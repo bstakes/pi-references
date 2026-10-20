@@ -45,14 +45,14 @@ Known limitation in cmux 0.65.2, commit `9d01f956c`: `cmux open` converts file U
 
 No settings file is needed. To customize behavior, create `~/.pi/agent/attachment-browser.json`. If you use a custom pi agent directory, put it there instead. The extension reads this file on session start and each `/files` invocation. It does not load project-local executable settings.
 
-For example, open Markdown through cmux and TypeScript through VS Code:
+For example, open Markdown through cmux and JavaScript/TypeScript through VS Code:
 
 ```json
 {
-  "openers": {
-    ".md": ["cmux", "open", "{uri}"],
-    ".ts": ["code", "--goto", "{path}:{line}:{column}"]
-  }
+  "openers": [
+    { "extensions": [".md"], "command": ["cmux", "open", "{uri}"] },
+    { "extensions": [".js", ".jsx", ".ts", ".tsx"], "command": ["code", "{path}"] }
+  ]
 }
 ```
 
@@ -87,13 +87,62 @@ To include paths mentioned in tool results and files written without an assistan
 | `excludeExtensions` | `[]` | Exclude matching suffixes, even if included above. |
 | `showMissing` | `false` | Show unresolved or unreadable references with a warning. Opening still requires a readable regular file. |
 | `defaultOpener` | `"auto"` | `"auto"`, `"system"`, or a command array. |
-| `openers` | `{}` | Per-suffix command arrays. Longest suffix wins, case-insensitively. `"*"` is the fallback. |
+| `openers` | `[]` | Rules with `extensions` and `command` arrays. Longest suffix wins, case-insensitively. `"*"` is the fallback. |
 
-Commands are executable-and-argument arrays, not shell strings. Supported placeholders are `{path}`, `{uri}`, `{fragment}`, `{line}`, and `{column}`. `{path}` is always the clean original file path. `{uri}` includes the selected heading or source fragment, if present. `{fragment}` is the fragment without the leading `#`, or an empty string. Line and column default to 1; heading names are not converted to line numbers. If a command contains no placeholders, the extension appends the absolute file path.
+Each opener rule shares one command across its extensions. Matching uses the filename, not parent directories. A matching suffix wins over `"*"`, then `defaultOpener` handles unmatched files. Rule order does not change priority. Duplicate suffixes, including case variants or multiple wildcards, are configuration errors. Extension arrays must be nonempty. There are no built-in file groups or content-based detection.
+
+Commands are executable-and-argument arrays, not shell strings. If a command contains no placeholders, the extension appends the absolute file path.
+
+| Placeholder | Value |
+| --- | --- |
+| `{path}` | Absolute file path without a location suffix. |
+| `{uri}` | File URI including the selected fragment, if present. Colon-style line locations do not invent a URI fragment. |
+| `{fragment}` | Original fragment without `#`, retaining percent escapes; empty when absent. |
+| `{line}` | Starting line number; empty when absent. |
+| `{column}` | Starting column number; empty when absent, even if a line is present. |
+
+An explicit `:1` produces `"1"`; a bare file produces `""`. Empty arguments are preserved, not removed. Launchers should check `{line}` first for a source location, otherwise `{fragment}` for a heading, otherwise open the plain file. A source fragment such as `#L42` supplies both fragment `"L42"` and line `"42"`. Heading names are not converted to line numbers. Apply viewer-specific defaults in your launcher rather than in the configuration template.
 
 Use a launcher that opens a separate viewer and exits. Child processes have no interactive terminal input or output; a terminal editor such as `vim` is not suitable as a direct opener. A custom opener can execute code, so only add commands you trust. The extension does not run commands automatically when it sees a reference.
 
-To use a browser, configure its launcher, for example `".html": ["open", "-a", "Firefox", "{uri}"]` on macOS. There is no HTTP server. Files that depend on HTTP, module loading, or a web app runtime may need your own development server instead.
+### An editor as the default opener
+
+You do not need a rule for every source-file extension. Use `defaultOpener` for your editor and rules only for exceptions, such as images and PDFs.
+
+For example, on macOS with zsh, add this function to `~/.zshrc` to open Neovim in a new cmux split:
+
+```zsh
+cmux_nvim() {
+  local file=$1 line=$2 column=$3 command_text
+  local -a args=(nvim)
+  if [[ -n $line ]]; then
+    args+=("+call cursor($line,${column:-1})")
+  fi
+  args+=(-- "$file")
+  printf -v command_text '%q ' "${args[@]}"
+  cmux new-split right --command "$command_text"
+}
+```
+
+Then configure:
+
+```json
+{
+  "defaultOpener": [
+    "zsh", "-ic", "cmux_nvim \"$@\"", "attachment-browser",
+    "{path}", "{line}", "{column}"
+  ],
+  "openers": [
+    { "extensions": [".pdf", ".png", ".jpg"], "command": ["open", "{uri}"] }
+  ]
+}
+```
+
+The extension cannot execute a shell function directly. `zsh -ic` loads `~/.zshrc` and calls the function; `attachment-browser` supplies `$0`, and the placeholder arguments follow as `$1`, `$2`, and `$3`. Values are passed through quoted `"$@"`, not interpolated into shell code. Adapt the shell, startup file, and viewer command for your system.
+
+This function jumps only when a line is present, using column 1 if none is supplied. Named headings open at the editor's normal position; a heading-aware function can also accept `{fragment}` and implement its own lookup. `printf '%q'` quotes each argument for cmux's shell-command string. Do not interpolate unquoted paths or fragments into `--command`.
+
+To use a browser, configure its launcher, for example `{ "extensions": [".html"], "command": ["open", "-a", "Firefox", "{uri}"] }` as an opener rule on macOS. There is no HTTP server. Files that depend on HTTP, module loading, or a web app runtime may need your own development server instead.
 
 ## Limits
 
