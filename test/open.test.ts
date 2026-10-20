@@ -196,3 +196,93 @@ test('real execution reports nonzero exit and missing executable errors', async 
   }), /exit code 7/);
   await assert.rejects(openFile({ path }, { defaultOpener: [join(directory, 'missing-opener')] }), /ENOENT/);
 });
+
+test('default openers preserve percent-encoded headings and encode hashes in filenames', () => {
+  const file = { path: 'folder/a%23b#c.md', fragment: 'Heading%20one' };
+  const uri = `${pathToFileURL(resolve(file.path)).href}#Heading%20one`;
+  assert.match(uri, /a%2523b%23c\.md#Heading%20one$/);
+  for (const platform of ['linux', 'darwin', 'win32'] as const) {
+    const context = { platform, env: { KEEP: 'yes' } };
+    const expected = platform === 'win32' ? {
+      command: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $env:PI_ATTACHMENT_URI'],
+      env: { KEEP: 'yes', PI_ATTACHMENT_URI: uri },
+    } : {
+      command: platform === 'darwin' ? 'open' : 'xdg-open',
+      args: platform === 'darwin' ? ['--', uri] : [uri],
+    };
+    assert.deepEqual(resolveOpenCommand(file, {}, context), expected);
+    assert.deepEqual(resolveOpenCommand(file, { defaultOpener: 'system' }, {
+      ...context, env: { KEEP: 'yes', CMUX_WORKSPACE_ID: 'workspace' },
+    }), platform === 'win32' ? {
+      ...expected, env: { KEEP: 'yes', CMUX_WORKSPACE_ID: 'workspace', PI_ATTACHMENT_URI: uri },
+    } : expected);
+    assert.deepEqual(resolveOpenCommand(file, {}, {
+      ...context, env: { CMUX_WORKSPACE_ID: 'workspace' },
+    }), { command: 'cmux', args: ['open', uri] });
+  }
+});
+
+test('Windows heading script is fixed and the URI is only passed in the environment', () => {
+  const file = { path: "evil ' ; $(whoami) &.md", fragment: "heading'; $(whoami)" };
+  const result = resolveOpenCommand(file, {}, { platform: 'win32', env: { PI_ATTACHMENT_URI: 'old' } });
+  const url = pathToFileURL(resolve(file.path));
+  url.hash = file.fragment;
+  assert.deepEqual(result.env, { PI_ATTACHMENT_URI: url.href });
+  assert.equal(result.args.at(-1), 'Start-Process -FilePath $env:PI_ATTACHMENT_URI');
+  assert.ok(!result.args.some((arg) => arg.includes(file.fragment) || arg.includes(file.path)));
+});
+
+test('custom placeholders distinguish clean paths, anchored URIs, and raw fragments', () => {
+  const path = 'folder/a%23b#c.md';
+  for (const fragment of [undefined, '', 'Heading%20one']) {
+    const file = { path, fragment };
+    const uri = `${pathToFileURL(resolve(path)).href}${fragment ? `#${fragment}` : ''}`;
+    assert.deepEqual(resolveOpenCommand(file, {
+      defaultOpener: ['editor', '{uri}', '{fragment}', '{path}', '{fragment}|{fragment}'],
+    }, linux), {
+      command: 'editor', args: [uri, fragment ?? '', resolve(path), `${fragment ?? ''}|${fragment ?? ''}`],
+    });
+    assert.deepEqual(resolveOpenCommand(file, { defaultOpener: ['editor', '--flag'] }, linux), {
+      command: 'editor', args: ['--flag', resolve(path)],
+    });
+    if (!fragment) {
+      assert.deepEqual(resolveOpenCommand(file, {}, linux), { command: 'xdg-open', args: [resolve(path)] });
+    }
+  }
+});
+
+test('heading execution validates the clean file and preserves the URI through every system fallback', async (t) => {
+  const { path, directory } = await fixture(t);
+  const file = { path, fragment: 'Heading%20one' };
+  const uri = `${pathToFileURL(path).href}#Heading%20one`;
+  for (const platform of ['linux', 'darwin', 'win32'] as const) {
+    const env = { CMUX_WORKSPACE_ID: 'workspace' };
+    const calls: ReturnType<typeof resolveOpenCommand>[] = [];
+    await openFile(file, {}, {
+      platform, env,
+      execute: async (command) => {
+        calls.push(command);
+        if (command.command === 'cmux') throw new Error('cmux unavailable');
+      },
+    });
+    assert.deepEqual(calls, [
+      { command: 'cmux', args: ['open', uri] },
+      resolveOpenCommand(file, { defaultOpener: 'system' }, { platform, env }),
+    ]);
+    const systemCalls: ReturnType<typeof resolveOpenCommand>[] = [];
+    await openFile(file, { defaultOpener: 'system' }, {
+      platform, env, execute: async (command) => { systemCalls.push(command); },
+    });
+    assert.deepEqual(systemCalls, [calls[1]]);
+  }
+  let executions = 0;
+  const context = { ...linux, execute: async () => { executions++; } };
+  await assert.rejects(openFile({ ...file, path: `${path}.missing` }, {}, context), /ENOENT/);
+  await assert.rejects(openFile({ ...file, path: directory }, {}, context), /Not a regular file/);
+  assert.equal(executions, 0);
+  await openFile(file, {}, {
+    ...linux, env: { CMUX_WORKSPACE_ID: 'workspace' },
+    execute: async (command) => { assert.deepEqual(command, { command: 'cmux', args: ['open', uri] }); },
+  });
+});

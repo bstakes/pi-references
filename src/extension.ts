@@ -4,6 +4,7 @@ import { loadSettings, type Settings } from "./config.ts";
 import { FileIndex } from "./file-index.ts";
 import { openFile } from "./open.ts";
 import { FilePicker, displayText, type PickerResult } from "./picker.ts";
+import { targetSuffix, targetUri } from "./targets.ts";
 
 export default function attachmentBrowser(pi: ExtensionAPI): void {
   const configPath = join(getAgentDir(), "attachment-browser.json");
@@ -71,7 +72,8 @@ export default function attachmentBrowser(pi: ExtensionAPI): void {
       );
       if (!result || state !== current) return;
       if (result.action === "paste") {
-        ctx.ui.pasteToEditor(JSON.stringify(result.file.path));
+        const reference = result.file.fragment ? targetUri(result.file) : result.file.path + targetSuffix(result.file);
+        ctx.ui.pasteToEditor(JSON.stringify(reference));
         return;
       }
       try {

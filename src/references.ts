@@ -1,14 +1,14 @@
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { targetKey, type FileTarget } from "./targets.ts";
 
 export type ReferenceSource = "assistant" | "toolOutput" | "writes";
 
-export interface FileReference {
-  path: string;
-  line?: number;
-  column?: number;
+export interface FileReference extends FileTarget {
   label?: string;
+  /** A short excerpt from the reply that mentioned this target. */
+  context?: string;
 }
 
 export interface IndexedFile extends FileReference {
@@ -20,13 +20,20 @@ export interface IndexedFile extends FileReference {
 export function parseReference(raw: string, cwd: string, explicit = false): FileReference | undefined {
   let value = raw.trim().replace(/^<|>$/g, "");
   if (!value || /[\x00-\x1f\x7f]/.test(value)) return;
+  // Separate URL fragments before decoding so heading anchors aren't treated
+  // as filenames, while an encoded %23 remains a literal filename character.
+  const fragmentIndex = value.indexOf("#");
+  const fragment = fragmentIndex < 0 ? undefined : value.slice(fragmentIndex + 1);
+  if (fragmentIndex >= 0) value = value.slice(0, fragmentIndex);
+  if (!value) return;
   let line: number | undefined;
   let column: number | undefined;
-  const location = value.match(/(?::(\d+)(?::(\d+))?|#L(\d+)(?:C(\d+))?(?:-L?\d+(?:C\d+)?)?)$/i);
+  const pathLocation = value.match(/:(\d+)(?::(\d+))?$/);
+  if (pathLocation) value = value.slice(0, pathLocation.index);
+  const location = fragment?.match(/^L(\d+)(?:C(\d+))?(?:-L?\d+(?:C\d+)?)?$/i) ?? pathLocation;
   if (location) {
-    line = Number(location[1] ?? location[3]);
-    column = location[2] || location[4] ? Number(location[2] ?? location[4]) : undefined;
-    value = value.slice(0, location.index);
+    line = Number(location[1]);
+    column = location[2] ? Number(location[2]) : undefined;
   }
   if (value.startsWith("file:")) {
     try {
@@ -54,6 +61,7 @@ export function parseReference(raw: string, cwd: string, explicit = false): File
   const path = isAbsolute(value) ? value : resolve(cwd, value);
   return {
     path,
+    ...(fragment ? { fragment } : {}),
     ...(line && Number.isSafeInteger(line) ? { line } : {}),
     ...(column && Number.isSafeInteger(column) ? { column } : {}),
   };
@@ -62,38 +70,46 @@ export function parseReference(raw: string, cwd: string, explicit = false): File
 /** Markdown links, reference-style links, inline code, and plain file paths. */
 export function extractReferences(text: string, cwd: string): FileReference[] {
   const found: FileReference[] = [];
-  const add = (raw: string, label?: string, explicit = false) => {
+  const add = (raw: string, label: string | undefined, explicit: boolean, offset: number, length: number) => {
     const ref = parseReference(raw, cwd, explicit);
-    if (ref) found.push({ ...ref, ...(label ? { label } : {}) });
+    if (!ref) return;
+    const start = Math.max(text.lastIndexOf("\n", offset - 1) + 1, offset - 80);
+    const nextLine = text.indexOf("\n", offset + length);
+    const end = Math.min(nextLine < 0 ? text.length : nextLine, offset + length + 100);
+    const context = text.slice(start, end)
+      .replace(/!?\[([^\]\n]*)\]\([^\n]*?\)/g, "$1")
+      .replace(/`([^`\n]+)`/g, "$1")
+      .replace(/[\x00-\x1f\x7f-\x9f\s]+/g, " ").trim().slice(0, 240);
+    found.push({ ...ref, ...(label ? { label } : {}), ...(context && context !== raw.trim() && context !== label ? { context } : {}) });
   };
+  const mask = (value: string) => " ".repeat(value.length);
   const definitions = new Map<string, string>();
-  let remaining = text.replace(/^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<([^>\n]+)>|(\S+))[^\n]*$/gm, (_all, id, angled, plain) => {
+  let remaining = text.replace(/^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<([^>\n]+)>|(\S+))[^\n]*$/gm, (all, id, angled, plain) => {
     definitions.set(id.trim().toLowerCase(), angled ?? plain);
-    return "";
+    return mask(all);
   });
-  // A destination can contain balanced parentheses one level deep.
+  // Preserve offsets while masking matches so context always comes from the
+  // original reply, not from text already rewritten by another parser pass.
   remaining = remaining.replace(/!?\[([^\]\n]*)\]\(\s*(<[^>\n]+>|(?:[^\s()]|\([^()]*\))+)(?:\s+["'][^\n]*?["'])?\s*\)/g,
-    (_all, label, target) => { add(target, label, true); return " "; });
-  remaining = remaining.replace(/\[([^\]\n]+)\](?:\[([^\]\n]*)\])?/g, (all, label, id) => {
+    (all, label, target, offset) => { add(target, label, true, offset, all.length); return mask(all); });
+  remaining = remaining.replace(/\[([^\]\n]+)\](?:\[([^\]\n]*)\])?/g, (all, label, id, offset) => {
     const target = definitions.get((id || label).trim().toLowerCase());
     if (!target) return all;
-    add(target, label, true);
-    return " ";
+    add(target, label, true, offset, all.length);
+    return mask(all);
   });
-  remaining = remaining.replace(/(?<!`)`([^`\n]+)`(?!`)/g, (_all, code) => {
-    // Treat an inline-code span as one path so a space-containing filename
-    // cannot also produce unrelated partial filename entries.
-    add(code, undefined, true);
-    return " ";
+  remaining = remaining.replace(/(?<!`)`([^`\n]+)`(?!`)/g, (all, code, offset) => {
+    add(code, undefined, true, offset, all.length);
+    return mask(all);
   });
-  remaining = remaining.replace(/<([^<>\n]+)>/g, (_all, target) => { add(target, undefined, true); return " "; });
-  for (const token of remaining.split(/\s+/)) {
-    const candidate = token.replace(/^[\[({"'`]+/, "").replace(/[\])},;.!?"'`]+$/, "");
-    add(candidate);
+  remaining = remaining.replace(/<([^<>\n]+)>/g, (all, target, offset) => { add(target, undefined, true, offset, all.length); return mask(all); });
+  for (const match of remaining.matchAll(/\S+/g)) {
+    const candidate = match[0].replace(/^[\[({"'`]+/, "").replace(/[\])},;.!?"'`]+$/, "");
+    add(candidate, undefined, false, match.index, match[0].length);
   }
   const unique = new Map<string, FileReference>();
   for (const ref of found) {
-    const key = `${ref.path}\0${ref.line ?? ""}\0${ref.column ?? ""}`;
+    const key = targetKey(ref);
     const previous = unique.get(key);
     unique.set(key, { ...previous, ...ref });
   }
@@ -104,9 +120,10 @@ export function mergeReferences(
   index: Map<string, IndexedFile>, references: FileReference[], source: ReferenceSource,
 ): void {
   for (const ref of references) {
-    const previous = index.get(ref.path);
-    index.delete(ref.path); // Map iteration order follows the most recent mention.
-    index.set(ref.path, {
+    const key = targetKey(ref);
+    const previous = index.get(key);
+    index.delete(key); // Iteration order follows the most recent mention.
+    index.set(key, {
       ...previous,
       ...ref,
       sources: [...new Set([...(previous?.sources ?? []), source])],

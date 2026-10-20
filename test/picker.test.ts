@@ -24,6 +24,52 @@ test("picker fuzzy-matches paths and link titles, then opens the original file r
   assert.equal(result?.action, "open");
 });
 
+test("typing a filename filters out matches found only in the shared project path", () => {
+  const cwd = resolve("/Users/example/projects/playground/pi-attachment-browser");
+  const candidates: AvailableFile[] = ["src/config.ts", "src/picker.ts", "README.md", "package.json"].map((name) => ({
+    path: resolve(cwd, name), sources: ["assistant"], mentions: 1, available: true,
+  }));
+  let result: PickerResult | undefined;
+  const picker = new FilePicker(candidates, cwd, theme, () => 24, (value) => { result = value; });
+  assert.ok(picker.render(120)[0].includes("4/4"));
+  let previousCount = candidates.length;
+  for (const character of "readme") {
+    picker.handleInput(character);
+    const count = Number(picker.render(120)[0].match(/· (\d+)\//)?.[1]);
+    assert.ok(count <= previousCount, `typing ${character} should not add candidates`);
+    previousCount = count;
+  }
+  assert.equal(previousCount, 1);
+  assert.ok(picker.render(120)[0].includes("1/4"));
+  picker.handleInput("\r");
+  assert.equal(result?.file.path, resolve(cwd, "README.md"));
+  for (const _character of "readme") picker.handleInput("\x7f");
+  assert.ok(picker.render(120)[0].includes("4/4"));
+});
+
+test("ordinary filename searches ignore unrelated external temporary-directory names", () => {
+  const candidates: AvailableFile[] = ["notes.md", "plan.md"].map((name) => ({
+    path: resolve("/private/var/folders/readme-plan-cache/T/session", name), sources: ["assistant"], mentions: 1, available: true,
+  }));
+  let result: PickerResult | undefined;
+  const picker = new FilePicker(candidates, "/project", theme, () => 24, (value) => { result = value; });
+  for (const character of "plan") picker.handleInput(`\x1b[${character.codePointAt(0)}u`);
+  assert.ok(picker.render(120)[0].includes("1/2"));
+  picker.handleInput("\r");
+  assert.equal(result?.file.path, candidates[1].path);
+});
+
+test("slash-qualified queries can still search the full external path", () => {
+  const candidates: AvailableFile[] = ["session-one", "session-two"].map((dir) => ({
+    path: resolve("/tmp", dir, "config.ts"), sources: ["assistant"], mentions: 1, available: true,
+  }));
+  let result: PickerResult | undefined;
+  const picker = new FilePicker(candidates, "/project", theme, () => 24, (value) => { result = value; }, "session-two/config");
+  assert.ok(picker.render(120)[0].includes("1/2"));
+  picker.handleInput("\r");
+  assert.equal(result?.file.path, candidates[1].path);
+});
+
 test("picker supports navigation, paste path, cancellation, and no-match input", () => {
   let result: PickerResult | undefined;
   let closed = false;
@@ -71,4 +117,39 @@ test("configured selection keybindings still work through the search input", (t)
   picker.handleInput("\x0e");
   picker.handleInput("\x0f");
   assert.equal(result?.file.path, files[1].path);
+});
+
+test("anchors in the same file have independent selection, links, and reply context", () => {
+  const path = resolve("/project/README.md");
+  const candidates: AvailableFile[] = [
+    { path, fragment: "configuration", label: "Personal settings", context: "Customize the opener using Personal settings.", sources: ["assistant"], mentions: 1, available: true },
+    { path, fragment: "installation", label: "Setup", context: "Install the package with Setup first.", sources: ["assistant"], mentions: 1, available: true },
+  ];
+  let rows = 24;
+  let result: PickerResult | undefined;
+  const picker = new FilePicker(candidates, "/project", theme, () => rows, (value) => { result = value; });
+  let rendered = picker.render(160).join("\n");
+  assert.ok(rendered.includes("README.md#configuration"));
+  assert.ok(rendered.includes("README.md#installation"));
+  assert.ok(rendered.includes("file:///project/README.md#configuration"));
+  assert.ok(rendered.includes(candidates[0].context!));
+  picker.handleInput("\x1b[B");
+  rows = 12;
+  picker.render(160); // Resize must preserve the selected anchor, not just its path.
+  rendered = picker.render(160).join("\n");
+  assert.ok(rendered.includes(candidates[1].context!));
+  picker.handleInput("\r");
+  assert.equal(result?.file.fragment, "installation");
+  assert.equal(result?.file.context, candidates[1].context);
+});
+
+test("anchor names can narrow the fuzzy list without changing the file target", () => {
+  const path = resolve("/project/README.md");
+  const candidates: AvailableFile[] = ["configuration", "installation"].map((fragment) => ({ path, fragment, sources: ["assistant"], mentions: 1, available: true }));
+  let result: PickerResult | undefined;
+  const picker = new FilePicker(candidates, "/project", theme, () => 24, (value) => { result = value; });
+  for (const char of "installation") picker.handleInput(char);
+  assert.ok(picker.render(120)[0].includes("1/2"));
+  picker.handleInput("\r");
+  assert.equal(result?.file.fragment, "installation");
 });

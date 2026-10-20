@@ -59,6 +59,37 @@ test("availability checks original external paths and never copies files", async
   assert.deepEqual(await index.available(), []);
 });
 
+test("an existing README linked with a heading fragment is not hidden as missing", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-files-heading-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const readme = join(root, "README.md");
+  await writeFile(readme, "## Optional personal configuration\n");
+  const index = new FileIndex(root, parseSettings({}));
+  const response = entry(assistant("[settings](README.md#optional-personal-configuration)"));
+  index.rebuild([response]);
+  assert.deepEqual((await index.available()).map((file) => [file.path, file.available]), [[readme, true]]);
+  index.ingest(assistant("[README](README.md)"));
+  assert.deepEqual((await index.available()).map((file) => [file.path, file.fragment]), [[readme, undefined], [readme, "optional-personal-configuration"]]);
+});
+
+test("session rebuild preserves distinct anchors with context and deduplicates repeated targets", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-files-anchors-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const readme = join(root, "README.md");
+  await writeFile(readme, "# Readme\n## Installation\n## Configuration\n");
+  const index = new FileIndex(root, parseSettings({}));
+  index.rebuild([
+    entry(assistant("Install with [setup](README.md#installation).")),
+    entry(assistant("Customize with [settings](README.md#configuration).")),
+    entry(assistant("Revisit [settings](README.md#configuration) before continuing.")),
+  ]);
+  const refs = await index.available();
+  assert.equal(refs.length, 2);
+  assert.deepEqual(refs.map((ref) => [ref.fragment, ref.mentions]), [["configuration", 2], ["installation", 1]]);
+  assert.equal(refs[0].context, "Revisit settings before continuing.");
+  assert.ok(refs.every((ref) => ref.path === readme && ref.available));
+});
+
 test("missing-file display and extension filters apply without a filesystem scan", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-files-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));

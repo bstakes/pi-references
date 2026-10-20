@@ -1,10 +1,11 @@
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
+import { targetUri } from './targets.ts';
+import type { FileTarget } from './targets.ts';
 
-export type FileLocation = { path: string; line?: number; column?: number };
+export type FileLocation = FileTarget;
 export type OpenCommand = string[];
 export type OpenSettings = {
   defaultOpener?: 'auto' | 'system' | OpenCommand;
@@ -31,7 +32,8 @@ function selectOpener(file: FileLocation, settings: OpenSettings): 'auto' | 'sys
   return selected ?? settings.openers?.['*'] ?? settings.defaultOpener ?? 'auto';
 }
 
-function systemCommand(path: string, context: Context): ResolvedCommand {
+function systemCommand(file: FileLocation, context: Context): ResolvedCommand {
+  const path = file.fragment ? targetUri(file) : resolve(file.path);
   switch (context.platform ?? process.platform) {
     case 'darwin':
       return { command: 'open', args: ['--', path] };
@@ -40,8 +42,10 @@ function systemCommand(path: string, context: Context): ResolvedCommand {
     case 'win32':
       return {
         command: 'powershell.exe',
-        args: ['-NoProfile', '-NonInteractive', '-Command', 'Invoke-Item -LiteralPath $env:PI_ATTACHMENT_PATH'],
-        env: { ...(context.env ?? process.env), PI_ATTACHMENT_PATH: path },
+        args: ['-NoProfile', '-NonInteractive', '-Command', file.fragment
+          ? 'Start-Process -FilePath $env:PI_ATTACHMENT_URI'
+          : 'Invoke-Item -LiteralPath $env:PI_ATTACHMENT_PATH'],
+        env: { ...(context.env ?? process.env), [file.fragment ? 'PI_ATTACHMENT_URI' : 'PI_ATTACHMENT_PATH']: path },
       };
     default:
       throw new Error(`No system file opener for platform: ${context.platform ?? process.platform}`);
@@ -56,8 +60,8 @@ function buildCommand(file: FileLocation, opener: 'auto' | 'system' | OpenComman
   const path = resolve(file.path);
   if (opener === 'auto' || opener === 'system') {
     return isAutoCmux(opener, context)
-      ? { command: 'cmux', args: ['open', path] }
-      : systemCommand(path, context);
+      ? { command: 'cmux', args: ['open', file.fragment ? targetUri(file) : path] }
+      : systemCommand(file, context);
   }
   if (!Array.isArray(opener) || opener.length === 0 ||
       opener.some((part) => typeof part !== 'string') || !opener[0].trim()) {
@@ -65,16 +69,18 @@ function buildCommand(file: FileLocation, opener: 'auto' | 'system' | OpenComman
   }
   const replacements: Record<string, string> = {
     path,
-    uri: pathToFileURL(path).href,
+    uri: targetUri(file),
+    fragment: file.fragment ?? '',
     line: String(file.line ?? 1),
     column: String(file.column ?? 1),
   };
   let hasPlaceholder = false;
-  const parts = opener.map((part) => part.replace(/\{(path|uri|line|column)\}/g, (_, key: string) => {
+  const parts = opener.map((part) => part.replace(/\{(path|uri|fragment|line|column)\}/g, (_, key: string) => {
     hasPlaceholder = true;
     return replacements[key];
   }));
   const [command, ...args] = parts;
+  // Custom commands opt into heading navigation with {uri}; otherwise retain the path contract.
   if (!hasPlaceholder) args.push(path);
   return { command, args };
 }
@@ -119,6 +125,6 @@ export async function openFile(
     await run(command);
   } catch (error) {
     if (!isAutoCmux(opener, context)) throw error;
-    await run(systemCommand(absoluteFile.path, context));
+    await run(systemCommand(absoluteFile, context));
   }
 }

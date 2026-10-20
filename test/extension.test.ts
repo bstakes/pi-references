@@ -6,6 +6,7 @@ import test from "node:test";
 import type { ExtensionCommandContext, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, type TUI } from "@earendil-works/pi-tui";
 import { loadExtensions } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js";
+import { targetUri } from "../src/targets.ts";
 
 // Load through pi itself, but supply a fake terminal. No model calls or desktop
 // application launches are needed to exercise lifecycle and command behavior.
@@ -85,6 +86,13 @@ test("pi loads the extension, restores history, updates branches, and applies se
   assert.ok(notices.at(-1)?.includes("defaultOpener"));
   await rm(join(root, "attachment-browser.json"));
 
+  entries.push(response(`Install with [setup](${plan}#installation).\nCustomize using [settings](${plan}#configuration) next.`));
+  await command.handler("configuration", ctx);
+  assert.equal(status, "Files 3 · /files");
+  assert.equal(pasted, JSON.stringify(targetUri({ path: plan, fragment: "configuration" })));
+  assert.ok(rendered.includes("#configuration"));
+  assert.ok(rendered.includes("Customize using settings next."));
+
   await emit("session_shutdown");
   assert.equal(status, undefined);
   for (const mode of ["rpc", "json", "print"] as const) {
@@ -92,5 +100,5 @@ test("pi loads the extension, restores history, updates branches, and applies se
     ctx.hasUI = mode === "rpc";
     await command.handler("", ctx);
   }
-  assert.equal(pickerCount, 1);
+  assert.equal(pickerCount, 2);
 });
