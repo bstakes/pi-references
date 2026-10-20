@@ -1,0 +1,68 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import test from "node:test";
+import { parseSettings } from "../src/config.ts";
+import { FileIndex } from "../src/file-index.ts";
+
+const assistant = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
+const entry = (message: unknown) => ({ type: "message", message });
+
+test("default discovery follows user-facing references, not users, thinking, or silent tool writes", () => {
+  const index = new FileIndex("/project", parseSettings({}));
+  index.rebuild([
+    entry({ role: "user", content: [{ type: "text", text: "user.md" }] }),
+    entry({ role: "assistant", content: [{ type: "thinking", thinking: "hidden.md" }, { type: "toolCall", id: "1", name: "write", arguments: { path: "silent.md" } }] }),
+    entry({ role: "toolResult", toolCallId: "1", toolName: "write", isError: false, content: [{ type: "text", text: "tool.md" }] }),
+    entry(assistant("[plan](plan.md) src/main.ts:42")),
+  ]);
+  assert.deepEqual(index.values().map((file) => file.path), [resolve("/project/src/main.ts"), resolve("/project/plan.md")]);
+  assert.equal(index.values()[0].line, 42);
+});
+
+test("writes and tool outputs are independently configurable, failed writes are excluded", () => {
+  const index = new FileIndex("/project", parseSettings({ sources: { assistant: false, writes: true, toolOutput: true } }));
+  for (const [id, name, path, error] of [["1", "write", "silent.md", false], ["2", "edit", "failed.ts", true], ["3", "read", "read.md", false], ["4", "readSeek_write_file", "generated.svg", false]] as const) {
+    index.ingest({ role: "assistant", content: [{ type: "text", text: "ignored.md" }, { type: "toolCall", id, name, arguments: { path } }] });
+    index.ingest({ role: "toolResult", toolCallId: id, toolName: name, isError: error, content: [{ type: "text", text: "output.pdf" }] });
+  }
+  assert.deepEqual(index.values().map((file) => file.path).sort(), ["silent.md", "output.pdf", "generated.svg"].map((file) => resolve("/project", file)).sort());
+});
+
+test("rebuild follows just the current branch, and reconstructs identical live state", () => {
+  const root = entry(assistant("plan.md"));
+  const abandoned = entry(assistant("abandoned.md"));
+  const current = entry(assistant("current.md"));
+  const index = new FileIndex("/project", parseSettings({}));
+  index.rebuild([root, abandoned]);
+  index.rebuild([root]);
+  index.ingest(current.message);
+  const live = index.values();
+  index.rebuild([root, current]);
+  assert.deepEqual(index.values(), live);
+  assert.equal(index.values().some((file) => file.path.endsWith("abandoned.md")), false);
+  index.rebuild([]);
+  assert.deepEqual(index.values(), []);
+});
+
+test("availability checks original external paths and never copies files", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-files-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const external = join(root, "playbook.md");
+  await writeFile(external, "plan");
+  await mkdir(join(root, "folder.md"));
+  const index = new FileIndex(join(root, "unrelated"), parseSettings({}));
+  index.ingest(assistant(`Read [playbook](${external}), ${join(root, "missing.md")} and ${join(root, "folder.md")}`));
+  assert.deepEqual((await index.available()).map((file) => [file.path, file.available]), [[external, true]]);
+  await rm(external);
+  assert.deepEqual(await index.available(), []);
+});
+
+test("missing-file display and extension filters apply without a filesystem scan", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-files-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const index = new FileIndex(root, parseSettings({ showMissing: true, includeExtensions: [".md", ".ts"], excludeExtensions: [".ts"] }));
+  index.ingest(assistant("missing.md main.ts report.pdf"));
+  assert.deepEqual((await index.available()).map((file) => [file.path, file.available]), [[join(root, "missing.md"), false]]);
+});
