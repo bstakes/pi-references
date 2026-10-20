@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { openFile, resolveOpenCommand } from '../src/open.ts';
 import type { OpenCommand, OpenSettings } from '../src/open.ts';
+import { parseReference } from '../src/references.ts';
 
 const linux = { platform: 'linux', env: {} } as const;
 
@@ -55,15 +56,42 @@ test('auto selects cmux only when CMUX_WORKSPACE_ID exists', () => {
 test('extension matching is case insensitive, longest suffix wins, and wildcard precedes default', () => {
   const settings: OpenSettings = {
     defaultOpener: ['default'],
-    openers: { '.GZ': ['gzip'], '.Tar.Gz': ['archive'], '.MD': ['markdown'], '*': ['fallback'] },
+    openers: [
+      { extensions: ['.GZ'], command: ['gzip'] },
+      { extensions: ['.Tar.Gz'], command: ['archive'] },
+      { extensions: ['.MD', '.TXT'], command: ['text'] },
+      { extensions: ['*'], command: ['fallback'] },
+    ],
   };
   for (const [path, command] of [
-    ['archive.TAR.GZ', 'archive'], ['archive.gz', 'gzip'], ['README.md', 'markdown'],
-    ['unknown', 'fallback'], ['directory.md/file.txt', 'fallback'],
+    ['archive.TAR.GZ', 'archive'], ['archive.gz', 'gzip'], ['README.md', 'text'],
+    ['unknown', 'fallback'], ['directory.md/file.txt', 'text'],
+    ['directory.md/file.bin', 'fallback'],
   ]) {
     assert.deepEqual(resolveOpenCommand({ path }, settings, linux), { command, args: [resolve(path)] });
   }
   assert.equal(resolveOpenCommand({ path: 'a.txt' }, { defaultOpener: ['default'] }, linux).command, 'default');
+});
+
+test('grouped rules preserve suffix priority regardless of rule or extension order', () => {
+  const openers = [
+    { extensions: ['*', '.png'], command: ['fallback'] },
+    { extensions: ['.gz', '.zip'], command: ['archive'] },
+    { extensions: ['.tar.gz', '.tgz'], command: ['tar'] },
+  ];
+  const reversed = [...openers].reverse().map((rule) => ({ ...rule, extensions: [...rule.extensions].reverse() }));
+  for (const rules of [openers, reversed]) {
+    for (const [path, command] of [
+      ['file.tar.gz', 'tar'], ['file.tgz', 'tar'], ['file.gz', 'archive'],
+      ['file.ZIP', 'archive'], ['file.png', 'fallback'], ['unknown', 'fallback'],
+    ]) {
+      assert.deepEqual(resolveOpenCommand({ path }, { openers: rules, defaultOpener: ['default'] }, linux), {
+        command, args: [resolve(path)],
+      });
+    }
+  }
+  assert.equal(resolveOpenCommand({ path: 'a.txt' }, { openers: [], defaultOpener: ['default'] }, linux).command, 'default');
+  assert.equal(resolveOpenCommand({ path: 'a.txt' }, { openers: [] }, linux).command, 'xdg-open');
 });
 
 test('substitutes combined placeholders literally, including repeated tokens and encoded file URI', () => {
@@ -80,10 +108,10 @@ test('substitutes combined placeholders literally, including repeated tokens and
   assert.ok(!result.args[1].includes('#'));
 });
 
-test('default location is 1:1 and URI has no invented line fragments', () => {
+test('absent location placeholders are empty and URI has no invented line fragments', () => {
   const file = { path: 'a.md' };
-  assert.deepEqual(resolveOpenCommand(file, { defaultOpener: ['editor', '{line}:{column}', '{uri}'] }, linux), {
-    command: 'editor', args: ['1:1', pathToFileURL(resolve(file.path)).href],
+  assert.deepEqual(resolveOpenCommand(file, { defaultOpener: ['editor', '{line}', '{column}', '{uri}'] }, linux), {
+    command: 'editor', args: ['', '', pathToFileURL(resolve(file.path)).href],
   });
 });
 
@@ -102,8 +130,10 @@ test('rejects empty or malformed commands, including matched extension and wildc
       defaultOpener: command as OpenCommand,
     }, linux), /non-empty array/);
   }
-  const invalidMappings: Record<string, OpenCommand>[] = [{ '.md': [] }, { '*': [] }];
-  for (const openers of invalidMappings) {
+  const invalidRules: NonNullable<OpenSettings['openers']>[] = [
+    [{ extensions: ['.md'], command: [] }], [{ extensions: ['*'], command: [] }],
+  ];
+  for (const openers of invalidRules) {
     assert.throws(() => resolveOpenCommand({ path: 'a.md' }, { openers }, linux), /non-empty array/);
   }
 });
@@ -169,7 +199,7 @@ test('explicit and extension commands never trigger auto fallback, even when nam
   for (const settings of [
     { defaultOpener: 'system' as const },
     { defaultOpener: ['cmux'] },
-    { openers: { '.md': ['cmux'] } },
+    { openers: [{ extensions: ['.md'], command: ['cmux'] }] },
   ]) {
     let calls = 0;
     const failure = new Error('opener failed');
@@ -284,5 +314,38 @@ test('heading execution validates the clean file and preserves the URI through e
   await openFile(file, {}, {
     ...linux, env: { CMUX_WORKSPACE_ID: 'workspace' },
     execute: async (command) => { assert.deepEqual(command, { command: 'cmux', args: ['open', uri] }); },
+  });
+});
+
+test('location placeholders distinguish bare files, headings, explicit line one, and source fragments', () => {
+  const path = 'folder/space " ; $(echo nope) {line} #%.md';
+  const cases = [
+    ['a.md', '', '', ''],
+    ['a.md:1', '1', '', ''],
+    ['a.md:1:1', '1', '1', ''],
+    ['a.md:42:3', '42', '3', ''],
+    ['a.md#Heading%20one', '', '', 'Heading%20one'],
+    ['a.md#L42', '42', '', 'L42'],
+    ['a.md#L42C3-L50', '42', '3', 'L42C3-L50'],
+    ['a.md:12#installation', '12', '', 'installation'],
+  ];
+  for (const [reference, line, column, fragment] of cases) {
+    const parsed = parseReference(reference, process.cwd(), true);
+    assert.ok(parsed);
+    const result = resolveOpenCommand({ ...parsed, path }, {
+      defaultOpener: ['launcher', '{path}', '{line}', '{column}', '{fragment}', '{line}|{line}'],
+    }, linux);
+    assert.deepEqual(result, {
+      command: 'launcher', args: [resolve(path), line, column, fragment, `${line}|${line}`],
+    }, reference);
+  }
+});
+
+test('real execution preserves absent locations as empty arguments rather than dropping them', async (t) => {
+  const { path } = await fixture(t);
+  await openFile({ path, fragment: 'Heading%20one' }, {
+    defaultOpener: [process.execPath, '-e',
+      'require("node:assert/strict").deepEqual(process.argv.slice(1), [process.argv[1], "", "", "Heading%20one"])',
+      '--', '{path}', '{line}', '{column}', '{fragment}'],
   });
 });

@@ -14,7 +14,7 @@ const defaults = (): Settings => ({
   excludeExtensions: [],
   showMissing: false,
   defaultOpener: "auto",
-  openers: {},
+  openers: [],
 });
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -25,8 +25,8 @@ function command(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every((arg) => typeof arg === "string" && !arg.includes("\0")) && value[0].trim().length > 0;
 }
 
-function extensions(value: unknown, name: string): string[] {
-  if (!Array.isArray(value) || !value.every((ext) => typeof ext === "string" && /^\.[\w.-]+$/.test(ext))) {
+function extensions(value: unknown, name: string, allowWildcard = false): string[] {
+  if (!Array.isArray(value) || !value.every((ext) => typeof ext === "string" && ((allowWildcard && ext === "*") || /^\.[\w.-]+$/.test(ext)))) {
     throw new Error(`${name} must be an array of suffixes such as [".md", ".pdf"].`);
   }
   return value.map((ext) => ext.toLowerCase());
@@ -59,12 +59,21 @@ export function parseSettings(value: unknown): Settings {
     settings.defaultOpener = value.defaultOpener;
   }
   if (value.openers !== undefined) {
-    if (!object(value.openers)) throw new Error("openers must map file suffixes to command arrays.");
-    settings.openers = {};
-    for (const [ext, args] of Object.entries(value.openers)) {
-      if ((ext !== "*" && !/^\.[\w.-]+$/.test(ext)) || !command(args)) throw new Error(`Invalid opener for ${ext}. Use a suffix and a nonempty command array.`);
-      settings.openers[ext.toLowerCase()] = args;
-    }
+    if (!Array.isArray(value.openers)) throw new Error("openers must be an array of { extensions, command } rules.");
+    const seen = new Set<string>();
+    settings.openers = value.openers.map((rule, index) => {
+      const name = `openers[${index}]`;
+      if (!object(rule) || Object.keys(rule).some((key) => key !== "extensions" && key !== "command") ||
+          !Array.isArray(rule.extensions) || !rule.extensions.length || !command(rule.command)) {
+        throw new Error(`${name} must have a nonempty extensions array and a nonempty command array.`);
+      }
+      const suffixes = extensions(rule.extensions, `${name}.extensions`, true);
+      for (const suffix of suffixes) {
+        if (seen.has(suffix)) throw new Error(`Duplicate opener for ${suffix}. Each suffix may appear only once.`);
+        seen.add(suffix);
+      }
+      return { extensions: suffixes, command: rule.command };
+    });
   }
   return settings;
 }

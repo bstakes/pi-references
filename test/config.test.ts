@@ -9,24 +9,43 @@ test("defaults need no config and all filters/openers are optional", () => {
   const defaults = parseSettings({});
   assert.deepEqual(defaults.sources, { assistant: true, toolOutput: false, writes: false });
   assert.equal(defaults.defaultOpener, "auto");
+  assert.deepEqual(defaults.openers, []);
   assert.equal(defaults.showMissing, false);
   assert.equal(acceptsExtension("/tmp/plan.md", defaults), true);
   assert.equal(acceptsExtension("/tmp/source.ts", defaults), true);
 });
 
 test("configuration overrides only specified fields and normalizes suffix case", () => {
-  const settings = parseSettings({ sources: { toolOutput: true }, includeExtensions: [".MD", ".tar.gz"], excludeExtensions: [".draft.md"], openers: { ".MD": ["cmux", "markdown", "open", "{path}"] } });
+  const settings = parseSettings({ sources: { toolOutput: true }, includeExtensions: [".MD", ".tar.gz"], excludeExtensions: [".draft.md"], openers: [{ extensions: [".MD", ".TXT"], command: ["cmux", "open", "{uri}"] }] });
   assert.equal(settings.sources.assistant, true);
   assert.equal(settings.sources.toolOutput, true);
   assert.equal(acceptsExtension("plan.MD", settings), true);
   assert.equal(acceptsExtension("plan.draft.md", settings), false);
   assert.equal(acceptsExtension("source.ts", settings), false);
-  assert.deepEqual(settings.openers?.[".md"], ["cmux", "markdown", "open", "{path}"]);
+  assert.deepEqual(settings.openers, [{ extensions: [".md", ".txt"], command: ["cmux", "open", "{uri}"] }]);
 });
 
 test("malformed config cannot quietly select executable commands", () => {
-  for (const value of [null, [], { typo: true }, { sources: { bad: true } }, { sources: { assistant: "yes" } }, { showMissing: 1 }, { includeExtensions: "md" }, { excludeExtensions: ["*"] }, { defaultOpener: "open {path}" }, { defaultOpener: [] }, { openers: { ".md": "sh -c something" } }, { openers: { "md": ["open"] } }, { openers: { ".md": [""] } }, { openers: { ".md": ["open", "\0"] } }]) {
-    assert.throws(() => parseSettings(value));
+  for (const value of [
+    null, [], { typo: true }, { sources: { bad: true } }, { sources: { assistant: "yes" } },
+    { showMissing: 1 }, { includeExtensions: "md" }, { excludeExtensions: ["*"] },
+    { defaultOpener: "open {path}" }, { defaultOpener: [] },
+    { openers: { ".md": ["open"] } },
+    ...[
+      null, [], "open", {},
+      { extensions: [".md"] }, { command: ["open"] },
+      { extensions: ".md", command: ["open"] },
+      { extensions: [], command: ["open"] },
+      { extensions: ["md"], command: ["open"] },
+      { extensions: [".md", 42], command: ["open"] },
+      { extensions: [".md"], command: "open {path}" },
+      { extensions: [".md"], command: [] },
+      { extensions: [".md"], command: [""] },
+      { extensions: [".md"], command: ["open", "\0"] },
+      { extensions: [".md"], command: ["open"], typo: true },
+    ].map((rule) => ({ openers: [rule] })),
+  ]) {
+    assert.throws(() => parseSettings(value), JSON.stringify(value));
   }
 });
 
@@ -39,4 +58,25 @@ test("missing personal config is fine; malformed JSON is reported", async (t) =>
   await assert.rejects(loadSettings(path));
   await writeFile(path, '{"sources":{"writes":true}}');
   assert.equal((await loadSettings(path)).sources.writes, true);
+});
+
+test("opener rules allow grouped suffixes and a wildcard without mutating input", () => {
+  const input = { openers: [
+    { extensions: [".PDF", ".PNG"], command: ["open", "{uri}"] },
+    { extensions: ["*"], command: ["editor", "{path}"] },
+  ] };
+  const snapshot = structuredClone(input);
+  assert.deepEqual(parseSettings(input).openers, [
+    { extensions: [".pdf", ".png"], command: ["open", "{uri}"] },
+    { extensions: ["*"], command: ["editor", "{path}"] },
+  ]);
+  assert.deepEqual(input, snapshot);
+  assert.deepEqual(parseSettings({ openers: [] }).openers, []);
+});
+
+test("duplicate suffixes and wildcards are rejected case-insensitively", () => {
+  for (const extensions of [[".md", ".MD"], ["*", "*"]]) {
+    assert.throws(() => parseSettings({ openers: [{ extensions, command: ["open"] }] }), /Duplicate opener/);
+    assert.throws(() => parseSettings({ openers: extensions.map((ext) => ({ extensions: [ext], command: ["open"] })) }), /Duplicate opener/);
+  }
 });

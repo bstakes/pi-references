@@ -7,9 +7,10 @@ import type { FileTarget } from './targets.ts';
 
 export type FileLocation = FileTarget;
 export type OpenCommand = string[];
+export type OpenerRule = { extensions: string[]; command: OpenCommand };
 export type OpenSettings = {
   defaultOpener?: 'auto' | 'system' | OpenCommand;
-  openers?: Record<string, OpenCommand>;
+  openers?: OpenerRule[];
 };
 
 type ResolvedCommand = { command: string; args: string[]; env?: NodeJS.ProcessEnv };
@@ -22,14 +23,18 @@ type ExecutionContext = Context & {
 function selectOpener(file: FileLocation, settings: OpenSettings): 'auto' | 'system' | OpenCommand {
   const name = basename(file.path).toLowerCase();
   let selected: OpenCommand | undefined;
+  let fallback: OpenCommand | undefined;
   let longest = -1;
-  for (const [extension, command] of Object.entries(settings.openers ?? {})) {
-    if (extension.startsWith('.') && name.endsWith(extension.toLowerCase()) && extension.length > longest) {
-      selected = command;
-      longest = extension.length;
+  for (const { extensions, command } of settings.openers ?? []) {
+    for (const extension of extensions) {
+      if (extension === '*') fallback = command;
+      else if (extension.startsWith('.') && name.endsWith(extension.toLowerCase()) && extension.length > longest) {
+        selected = command;
+        longest = extension.length;
+      }
     }
   }
-  return selected ?? settings.openers?.['*'] ?? settings.defaultOpener ?? 'auto';
+  return selected ?? fallback ?? settings.defaultOpener ?? 'auto';
 }
 
 function systemCommand(file: FileLocation, context: Context): ResolvedCommand {
@@ -71,8 +76,8 @@ function buildCommand(file: FileLocation, opener: 'auto' | 'system' | OpenComman
     path,
     uri: targetUri(file),
     fragment: file.fragment ?? '',
-    line: String(file.line ?? 1),
-    column: String(file.column ?? 1),
+    line: String(file.line ?? ''),
+    column: String(file.column ?? ''),
   };
   let hasPlaceholder = false;
   const parts = opener.map((part) => part.replace(/\{(path|uri|fragment|line|column)\}/g, (_, key: string) => {
