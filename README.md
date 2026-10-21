@@ -8,10 +8,10 @@ Built-in cmux support needs no configuration. Inside a cmux workspace, Enter ope
 
 Requires pi 1.3.0 or later and Node.js 22.19 or later.
 
-Install from GitHub:
+Install from npm:
 
 ```sh
-pi install git:github.com/bstakes/pi-references
+pi install npm:@bstakes/pi-references
 ```
 
 This adds the package to your personal pi settings for future launches. Resume an existing session to browse its earlier references too.
@@ -19,8 +19,10 @@ This adds the package to your personal pi settings for future launches. Resume a
 To try it for one launch without changing settings:
 
 ```sh
-pi -e git:github.com/bstakes/pi-references
+pi -e npm:@bstakes/pi-references
 ```
+
+You can also install from GitHub with `pi install git:github.com/bstakes/pi-references`.
 
 From a local checkout, use `pi -e ./src/extension.ts` to try it, or `pi install /absolute/path/to/pi-references` to keep it installed.
 
