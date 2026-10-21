@@ -155,55 +155,17 @@ The [built-in cmux integration](#built-in-cmux-support) uses `cmux open`. The fo
 
 ### Opening source files in a cmux split
 
-Use an executable wrapper for terminal editors. Do not launch an interactive shell to load aliases or functions. Shell startup adds latency and can trigger job control that suspends pi. For aliases that just invoke a command, configure that command directly.
+Use the bundled `scripts/cmux-nvim` wrapper for terminal editors. It opens a new right split for each reference, starts Neovim directly without an interactive shell or an echoed launch command, and focuses the editor. Quitting Neovim successfully closes that split; a failed editor stays visible for diagnostics.
 
-Save this script as `cmux-nvim`:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-if [[ $# -lt 1 || $# -gt 3 ]]; then
-  echo 'Usage: cmux-nvim FILE [LINE [COLUMN]]' >&2
-  exit 2
-fi
-file=$1
-line=${2:-}
-column=${3:-}
-for number in "$line" "$column"; do
-  if [[ -n $number && ! $number =~ ^[1-9][0-9]*$ ]]; then
-    echo 'Line and column must be positive integers or empty.' >&2
-    exit 2
-  fi
-done
-[[ $file == /* ]] || file="$PWD/$file"
-if [[ ! -f $file || ! -r $file ]]; then
-  printf 'Not a readable file: %s\n' "$file" >&2
-  exit 1
-fi
-: "${CMUX_WORKSPACE_ID:?Run this inside a cmux workspace}"
-: "${CMUX_SURFACE_ID:?Run this inside a cmux surface}"
-nvim_bin=$(command -v nvim)
-args=("$nvim_bin")
-if [[ -n $line ]]; then
-  args+=("+call cursor($line,${column:-1})")
-fi
-args+=(-- "$file")
-printf -v editor_command '%q ' "${args[@]}"
-printf -v command_text '/bin/bash -c %q' "exec $editor_command"
-exec cmux new-split right \
-  --workspace "$CMUX_WORKSPACE_ID" \
-  --surface "$CMUX_SURFACE_ID" \
-  --command "$command_text"
-```
-
-Install it on macOS:
+Install it from this checkout on macOS:
 
 ```sh
-sudo install -m 755 cmux-nvim /usr/local/bin/cmux-nvim
+sudo install -m 755 scripts/cmux-nvim /usr/local/bin/cmux-nvim
 ```
 
-Both `cmux` and `nvim` must be on pi's `PATH`. The wrapper opens Neovim in a right split beside the calling surface. It jumps only when a line is present, using column 1 if none is supplied. Named headings open at the editor's normal position. The command arguments are quoted with Bash's `printf '%q'` and executed with noninteractive Bash, without loading shell startup files.
+`cmux`, `nvim`, and `node` must be on pi's `PATH`. The wrapper uses cmux's `surface.split` socket API with `initial_command`, verified on cmux 0.65.2. In that version, `new-split --command` instead supplies terminal input to an interactive shell, which shows the command before the editor launches and waits for shell startup. The wrapper deliberately does not use that route or fall back to it.
+
+It jumps only when a line is present, using column 1 if none is supplied. Named headings open at the editor's normal position. Arguments are quoted with Bash's `printf '%q'`, encoded as JSON using Node.js, and executed with noninteractive Bash without loading its profile or rc files.
 
 Configure `~/.pi/agent/references.json`:
 

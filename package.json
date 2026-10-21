@@ -5,7 +5,7 @@
   "type": "module",
   "keywords": ["pi-package"],
   "license": "MIT",
-  "files": ["src", "README.md", "LICENSE"],
+  "files": ["src", "scripts", "README.md", "LICENSE"],
   "pi": { "extensions": ["./src/extension.ts"] },
   "scripts": {
     "test": "node --test test/*.test.ts",

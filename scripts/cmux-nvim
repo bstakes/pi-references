@@ -1,0 +1,46 @@
+#!/bin/bash
+# Open a disposable Neovim split without starting an interactive shell.
+set -euo pipefail
+
+if [[ $# -lt 1 || $# -gt 3 || ${1:-} == --help || ${1:-} == -h ]]; then
+  echo 'Usage: cmux-nvim FILE [LINE [COLUMN]]' >&2
+  exit 2
+fi
+file=$1
+line=${2:-}
+column=${3:-}
+for number in "$line" "$column"; do
+  if [[ -n $number && ! $number =~ ^[1-9][0-9]*$ ]]; then
+    echo 'Line and column must be positive integers or empty.' >&2
+    exit 2
+  fi
+done
+[[ $file == /* ]] || file="$PWD/$file"
+if [[ ! -f $file || ! -r $file ]]; then
+  printf 'Not a readable file: %s\n' "$file" >&2
+  exit 1
+fi
+: "${CMUX_WORKSPACE_ID:?Run this inside a cmux workspace}"
+: "${CMUX_SURFACE_ID:?Run this inside a cmux surface}"
+nvim_bin=$(command -v nvim)
+cmux_bin=$(command -v cmux)
+args=("$nvim_bin")
+if [[ -n $line ]]; then
+  args+=("+call cursor($line,${column:-1})")
+fi
+args+=(-- "$file")
+printf -v editor_command '%q ' "${args[@]}"
+printf -v close_command '%q rpc surface.close "{\\"workspace_id\\":\\"$CMUX_WORKSPACE_ID\\",\\"surface_id\\":\\"$CMUX_SURFACE_ID\\",\\"force\\":true}"' "$cmux_bin"
+# cmux holds direct-command terminals open after exit. Close only on success,
+# leaving startup errors visible. These IDs belong to the newly created split.
+printf -v command_text '/bin/bash --noprofile --norc -c %q' "$editor_command; result=\$?; if [ \"\$result\" -eq 0 ]; then $close_command; fi; exit \"\$result\""
+params=$(node -e '
+  const [workspace, surface, command] = process.argv.slice(1);
+  process.stdout.write(JSON.stringify({
+    workspace_id: workspace, surface_id: surface, direction: "right",
+    initial_command: command, focus: true
+  }));
+' "$CMUX_WORKSPACE_ID" "$CMUX_SURFACE_ID" "$command_text")
+# --command uses initial_input in cmux 0.65.2, which echoes the command and loads
+# an interactive shell. initial_command starts the editor as the pane process.
+exec "$cmux_bin" rpc surface.split "$params"
