@@ -1,10 +1,14 @@
 {
   "name": "@bstakes/pi-references",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Find and open file and web references mentioned in your pi session.",
   "type": "module",
   "keywords": ["pi-package"],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bstakes/pi-references.git"
+  },
   "files": ["src", "scripts", "README.md", "LICENSE"],
   "pi": { "extensions": ["./src/extension.ts"] },
   "scripts": {
