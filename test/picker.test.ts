@@ -96,6 +96,22 @@ test("picker emits encoded native file hyperlinks and preserves displayed line l
   assert.equal(displayText("bad\x1b]52;clipboard\x07\nname"), "bad]52;clipboardname");
 });
 
+test("picker rows show link titles or reply excerpts instead of source tags", () => {
+  const candidates: AvailableFile[] = [
+    { path: "/project/titled.md", label: "Deployment playbook", context: "Read the playbook before deploying.", sources: ["assistant"], mentions: 1, available: true },
+    { path: "/project/context.md", context: "Explains the retry policy.", sources: ["toolOutput"], mentions: 1, available: true },
+    { path: "/project/plain.md", sources: ["writes"], mentions: 1, available: true },
+    { path: "/project/missing.md", context: "Generated deployment notes.", sources: ["assistant", "writes"], mentions: 1, available: false },
+  ];
+  const picker = new FilePicker(candidates, "/project", theme, () => 24, () => {});
+  const rendered = picker.render(180);
+  assert.ok(rendered.some((line) => line.includes("titled.md") && line.includes("Deployment playbook")));
+  assert.ok(rendered.some((line) => line.includes("context.md") && line.includes("Explains the retry policy.")));
+  assert.ok(rendered.some((line) => line.includes("plain.md")));
+  assert.ok(rendered.some((line) => line.includes("missing.md") && line.includes("missing or unreadable") && line.includes("Generated deployment notes.")));
+  assert.ok(!/assistant|toolOutput|writes/.test(rendered.join("\n")));
+});
+
 test("rendering fits narrow and wide terminals, Unicode, and resize", () => {
   let rows = 24;
   const picker = new FilePicker(files, "/project", theme, () => rows, () => {});

@@ -65,7 +65,7 @@ export class FilePicker implements Component, Focusable {
     this.list = new SelectList(this.filtered.map((file) => ({
       value: targetKey(file),
       label: hyperlink(this.name(file), targetUri(file)),
-      description: displayText([file.kind === "web" ? "web" : file.available ? "" : "missing or unreadable", file.label, file.sources.join(", ")].filter(Boolean).join(" · ")),
+      description: displayText([file.kind === "web" ? "web" : file.available ? "" : "missing or unreadable", file.label || file.context].filter(Boolean).join(" · ")),
     })), this.maxVisible, {
       selectedPrefix: (text) => this.theme.fg("accent", text),
       selectedText: (text) => this.theme.fg("accent", text),
