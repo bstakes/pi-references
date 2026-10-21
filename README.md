@@ -1,6 +1,6 @@
 # pi references
 
-Fuzzy-find files the assistant references in your pi session. Plans, playbooks, images, source code, and `/tmp` outputs stay where they are. This extension keeps references, not copies.
+Fuzzy-find files and web links the assistant references in your pi session. Plans, playbooks, images, source code, and `/tmp` outputs stay where they are. This extension keeps references, not copies.
 
 Built-in cmux support needs no configuration. Inside a cmux workspace, Enter opens files with `cmux open`. In other terminals, it uses your operating system's default app. You can also configure custom openers, including terminal editors in cmux splits.
 
@@ -16,31 +16,33 @@ To load the package on future launches, run `pi install /absolute/path/to/pi-ref
 
 ## Use it
 
-Run `/refs`, or `/refs playbook` to start with a search. The References picker filters and ranks matches as you type. Ordinary queries search project-relative paths, external filenames, anchors, and Markdown link titles, without matching the shared project root or temporary-directory prefixes. Include a slash in the query to search full paths. Recent mentions appear first when the query is empty.
+Run `/refs`, or `/refs playbook` to start with a search. The References picker filters and ranks matches as you type. Ordinary queries search project-relative paths, external filenames, anchors, web URLs, and Markdown link titles, without matching the shared project root or temporary-directory prefixes. Include a slash in the query to search full file paths. Recent mentions appear first when the query is empty.
 
-- Type to filter, then use Up/Down and Enter to open a file.
-- Click a file hyperlink using your terminal's usual modifier, such as Ctrl+click or Cmd+click.
-- Press Ctrl+Y to paste the selected reference into the pi prompt, quoted as a JSON string. Anchored references use a `file://` URI to retain the heading; source locations retain their line and column. This does not modify the system clipboard.
+- Type to filter, then use Up/Down and Enter to open a file or web link.
+- Click a hyperlink using your terminal's usual modifier, such as Ctrl+click or Cmd+click.
+- Press Ctrl+Y to paste the selected reference into the pi prompt, quoted as a JSON string. Anchored file references use a `file://` URI to retain the heading; source locations retain their line and column. Web links retain their query strings and fragments. This does not modify the system clipboard.
 - Press Escape to close the list.
 
-A dim `References N · /refs` status appears when the session has matching, readable references. It updates after each agent run. Set `"showStatus": false` in your personal configuration to hide it without disabling `/refs`. N counts distinct targets, so two anchors in one file count separately. Existing custom pi selection keybindings work in the picker.
+A dim `References N · /refs` status appears when the session has matching references. It updates after each agent run. Set `"showStatus": false` in your personal configuration to hide it without disabling `/refs`. N counts distinct targets, so two anchors in one file count separately. Existing custom pi selection keybindings work in the picker.
 
 ### What gets indexed
 
 The default is files referenced in the assistant's visible text, not every file written during a run. It recognizes local Markdown links, reference-style links, inline-code paths, plain paths, and `file://` links. References can point outside the project, including `/tmp`. Heading fragments such as `README.md#optional-personal-configuration` remain attached to the reference while discovery checks the underlying file. Encode a literal `#` in a filename as `%23`. Source locations such as `src/main.ts:42:3` and `src/main.ts#L42-L50` retain their starting line and column.
 
+HTTP and HTTPS links are also indexed by default, including Markdown links, reference-style links, autolinks, inline-code URLs, and plain URLs. They appear alongside files with a `web` marker. Search by link title, hostname, or any part of the URL. Query strings and fragments distinguish targets. Links are never fetched or checked for reachability. Other URL schemes are not indexed, except local `file://` links as described above.
+
 Relative paths resolve against the session working directory. References with spaces work as Markdown destinations, encoded URLs, or inline-code paths. Different anchors and source locations have separate picker entries. Repeated mentions of the same target merge and retain the latest available reply excerpt and link title. The selected entry shows that excerpt below its full path and anchor. The picker never reads file contents, copies attachments, or rewrites the assistant's reply.
 
-The index is derived from the active session branch. Resume, reload, fork, and tree navigation use that branch's transcript. Compaction does not require a second index file. Thinking blocks and user prompts are not indexed. Missing or unreadable files are hidden by default, and paths are checked again whenever you open the list.
+The index is derived from the active session branch. Resume, reload, fork, and tree navigation use that branch's transcript. Compaction does not require a second index file. Thinking blocks and user prompts are not indexed. Missing or unreadable files are hidden by default, and file paths are checked again whenever you open the list.
 
 ### How opening works
 
 Enter and hyperlink clicks use different opening mechanisms.
 
-- **Enter** uses the extension's opener. By default, it detects cmux as described below. Outside cmux, it uses the OS file association through macOS `open`, Linux `xdg-open`, or Windows PowerShell.
-- **Hyperlink clicks** follow standard OSC 8 links to `file://` URLs. Your terminal and operating system control what happens. The extension does not intercept Ctrl+click or install a URL handler. Opener settings affect Enter, not link clicks.
+- **Enter** uses the extension's opener. For files, it detects cmux as described below. Outside cmux, it uses the OS file association through macOS `open`, Linux `xdg-open`, or Windows PowerShell. Web links always use the OS default browser, bypassing cmux and custom file opener rules.
+- **Hyperlink clicks** follow standard OSC 8 links to `file://`, `http://`, or `https://` URLs. Your terminal and operating system control what happens. The extension does not intercept Ctrl+click or install a URL handler. Opener settings affect Enter for files, not web links or hyperlink clicks.
 
-The default Enter opener passes references with fragments as anchored file URIs and other files as absolute paths. The extension checks that the underlying file is readable before launching an opener. The viewer must honor URI fragments to scroll to a heading. The extension does not render Markdown or inject scrolling scripts.
+For files, the default Enter opener passes references with fragments as anchored file URIs and other files as absolute paths. The extension checks that the underlying file is readable before launching an opener. The viewer must honor URI fragments to scroll to a heading. The extension does not render Markdown or inject scrolling scripts.
 
 ### Built-in cmux support
 
@@ -66,7 +68,17 @@ For example, open JavaScript and TypeScript in VS Code while leaving other files
 
 ### Filtering and sources
 
-To limit the list to documents and images:
+To keep the picker file-only, set `includeWebLinks` to `false` in `~/.pi/agent/references.json`:
+
+```json
+{
+  "includeWebLinks": false
+}
+```
+
+Web links are enabled by default. The existing source settings apply to both files and links. File extension filters and `showMissing` apply only to files.
+
+To limit file entries to documents and images:
 
 ```json
 {
@@ -92,9 +104,10 @@ To include paths mentioned in tool results and files written without an assistan
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| `sources.assistant` | `true` | Paths in the assistant's text blocks. |
-| `sources.toolOutput` | `false` | Paths in tool-result text, including failed results. Can be noisy. |
+| `sources.assistant` | `true` | File paths and web links in the assistant's text blocks. |
+| `sources.toolOutput` | `false` | File paths and web links in tool-result text, including failed results. Can be noisy. |
 | `sources.writes` | `false` | Successful direct calls to `write`, `edit`, `readSeek_write_file`, and `readSeek_edit_text`. Includes modifications to existing files. |
+| `includeWebLinks` | `true` | Include HTTP and HTTPS links from enabled text sources. Links open in the default browser without file checks or extension filtering. |
 | `includeExtensions` | Unset | Allow all suffixes. An explicit array limits them; `[]` includes none. |
 | `excludeExtensions` | `[]` | Exclude matching suffixes, even if included above. |
 | `showMissing` | `false` | Show unresolved or unreadable references with a warning. Opening still requires a readable regular file. |
@@ -202,7 +215,7 @@ Only the listed source extensions use Neovim. Markdown opens directly in cmux's 
 
 ## Limits
 
-Discovery is text-based, not a complete Markdown parser. Unusual escaping, deeply nested link destinations, and paths embedded in arbitrary code or structured tool data may be missed. Web URLs and remote file shares are not indexed. This extension does not monitor the filesystem, infer shell redirection targets, discover unreferenced build outputs, or preserve deleted temporary files. Optional write tracking does not reconstruct tools nested inside another tool.
+Discovery is text-based, not a complete Markdown parser. Unusual escaping, deeply nested link destinations, and paths embedded in arbitrary code or structured tool data may be missed. Remote file shares and URL schemes other than HTTP, HTTPS, and local `file://` links are not indexed. This extension does not monitor the filesystem, infer shell redirection targets, discover unreferenced build outputs, or preserve deleted temporary files. Optional write tracking does not reconstruct tools nested inside another tool.
 
 Under SSH, file paths refer to the machine running pi. The local terminal may not be able to open those paths. Use your terminal's remote-file handling or configure an appropriate opener.
 
