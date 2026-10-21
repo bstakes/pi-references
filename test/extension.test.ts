@@ -37,6 +37,7 @@ test("pi loads the extension, restores history, updates branches, and applies se
     sessionManager: { getBranch: () => entries },
     ui: {
       setStatus: (_key: string, text: string | undefined) => { status = text; },
+      theme: { fg: (color: string, text: string) => `<${color}>${text}</${color}>` },
       notify: (text: string) => { notices.push(text); },
       pasteToEditor: (text: string) => { pasted = text; },
       custom: async (factory: Parameters<ExtensionUIContext["custom"]>[0]) => {
@@ -61,7 +62,7 @@ test("pi loads the extension, restores history, updates branches, and applies se
   assert.equal(extension.tools.size, 0, "doesn't add a model tool or require agent cooperation");
 
   await emit("session_start");
-  assert.equal(status, "Files 1 · /files");
+  assert.equal(status, "<dim>Files 1 · /files</dim>");
   await command.handler("pln", ctx);
   assert.equal(pasted, JSON.stringify(plan));
   assert.ok(rendered.includes("file://"));
@@ -71,24 +72,37 @@ test("pi loads the extension, restores history, updates branches, and applies se
   entries.push(latest);
   await emit("message_end", { message: latest.message });
   await emit("agent_end");
-  assert.equal(status, "Files 2 · /files");
+  assert.equal(status, "<dim>Files 2 · /files</dim>");
   entries = entries.slice(0, 1);
   await emit("session_tree");
-  assert.equal(status, "Files 1 · /files");
+  assert.equal(status, "<dim>Files 1 · /files</dim>");
 
+  await writeFile(join(root, "attachment-browser.json"), '{"showStatus":false}');
+  await emit("session_tree");
+  assert.equal(status, undefined, "hides an existing status when disabled");
+  await emit("agent_end");
+  assert.equal(status, undefined, "agent runs keep the status hidden");
+  await command.handler("pln", ctx);
+  assert.equal(pickerCount, 2, "the picker still works with the status hidden");
+  assert.equal(pasted, JSON.stringify(plan));
+  assert.equal(status, undefined);
+  await writeFile(join(root, "attachment-browser.json"), '{"showStatus":true}');
+  await emit("session_tree");
+  assert.equal(status, "<dim>Files 1 · /files</dim>");
   await writeFile(join(root, "attachment-browser.json"), '{"includeExtensions":[".pdf"]}');
   await command.handler("", ctx);
-  assert.equal(pickerCount, 1);
+  assert.equal(pickerCount, 2);
+  assert.equal(status, undefined, "no status when no files match");
   assert.ok(notices.at(-1)?.includes("No readable referenced files"));
   await writeFile(join(root, "attachment-browser.json"), '{"defaultOpener":"invalid"}');
   await command.handler("", ctx);
-  assert.equal(pickerCount, 1);
+  assert.equal(pickerCount, 2);
   assert.ok(notices.at(-1)?.includes("defaultOpener"));
   await rm(join(root, "attachment-browser.json"));
 
   entries.push(response(`Install with [setup](${plan}#installation).\nCustomize using [settings](${plan}#configuration) next.`));
   await command.handler("configuration", ctx);
-  assert.equal(status, "Files 3 · /files");
+  assert.equal(status, "<dim>Files 3 · /files</dim>");
   assert.equal(pasted, JSON.stringify(targetUri({ path: plan, fragment: "configuration" })));
   assert.ok(rendered.includes("#configuration"));
   assert.ok(rendered.includes("Customize using settings next."));
@@ -100,5 +114,5 @@ test("pi loads the extension, restores history, updates branches, and applies se
     ctx.hasUI = mode === "rpc";
     await command.handler("", ctx);
   }
-  assert.equal(pickerCount, 2);
+  assert.equal(pickerCount, 3);
 });

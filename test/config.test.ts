@@ -11,6 +11,7 @@ test("defaults need no config and all filters/openers are optional", () => {
   assert.equal(defaults.defaultOpener, "auto");
   assert.deepEqual(defaults.openers, []);
   assert.equal(defaults.showMissing, false);
+  assert.equal(defaults.showStatus, true);
   assert.equal(acceptsExtension("/tmp/plan.md", defaults), true);
   assert.equal(acceptsExtension("/tmp/source.ts", defaults), true);
 });
@@ -23,6 +24,14 @@ test("configuration overrides only specified fields and normalizes suffix case",
   assert.equal(acceptsExtension("plan.draft.md", settings), false);
   assert.equal(acceptsExtension("source.ts", settings), false);
   assert.deepEqual(settings.openers, [{ extensions: [".md", ".txt"], command: ["cmux", "open", "{uri}"] }]);
+});
+
+test("showStatus accepts booleans and rejects other values", () => {
+  assert.equal(parseSettings({ showStatus: false }).showStatus, false);
+  assert.equal(parseSettings({ showStatus: true }).showStatus, true);
+  for (const showStatus of [null, 0, 1, "false", [], {}]) {
+    assert.throws(() => parseSettings({ showStatus }), /showStatus must be a boolean/);
+  }
 });
 
 test("malformed config cannot quietly select executable commands", () => {

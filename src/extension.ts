@@ -17,9 +17,13 @@ export default function attachmentBrowser(pi: ExtensionAPI): void {
 
   const updateStatus = async (ctx: ExtensionContext) => {
     if (ctx.mode !== "tui" || !state) return;
+    if (!state.settings.showStatus) {
+      ctx.ui.setStatus("attachment-browser", undefined);
+      return;
+    }
     const version = generation;
     const files = await state.index.available();
-    if (version === generation) ctx.ui.setStatus("attachment-browser", files.length ? `Files ${files.length} · /files` : undefined);
+    if (version === generation) ctx.ui.setStatus("attachment-browser", files.length ? ctx.ui.theme.fg("dim", `Files ${files.length} · /files`) : undefined);
   };
 
   const rebuild = async (ctx: ExtensionContext) => {

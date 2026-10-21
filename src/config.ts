@@ -7,12 +7,14 @@ export interface Settings extends OpenSettings {
   includeExtensions?: string[];
   excludeExtensions: string[];
   showMissing: boolean;
+  showStatus: boolean;
 }
 
 const defaults = (): Settings => ({
   sources: { assistant: true, toolOutput: false, writes: false },
   excludeExtensions: [],
   showMissing: false,
+  showStatus: true,
   defaultOpener: "auto",
   openers: [],
 });
@@ -35,7 +37,7 @@ function extensions(value: unknown, name: string, allowWildcard = false): string
 export function parseSettings(value: unknown): Settings {
   if (!object(value)) throw new Error("Settings must be a JSON object.");
   const settings = defaults();
-  const known = new Set(["sources", "includeExtensions", "excludeExtensions", "showMissing", "defaultOpener", "openers"]);
+  const known = new Set(["sources", "includeExtensions", "excludeExtensions", "showMissing", "showStatus", "defaultOpener", "openers"]);
   for (const key of Object.keys(value)) {
     if (!known.has(key)) throw new Error(`Unknown attachment-browser setting: ${key}`);
   }
@@ -51,6 +53,10 @@ export function parseSettings(value: unknown): Settings {
   if (value.showMissing !== undefined) {
     if (typeof value.showMissing !== "boolean") throw new Error("showMissing must be a boolean.");
     settings.showMissing = value.showMissing;
+  }
+  if (value.showStatus !== undefined) {
+    if (typeof value.showStatus !== "boolean") throw new Error("showStatus must be a boolean.");
+    settings.showStatus = value.showStatus;
   }
   if (value.defaultOpener !== undefined) {
     if (value.defaultOpener !== "auto" && value.defaultOpener !== "system" && !command(value.defaultOpener)) {

@@ -23,7 +23,7 @@ Run `/files`, or `/files playbook` to start with a search. The picker filters an
 - Press Ctrl+Y to paste the selected reference into the pi prompt, quoted as a JSON string. Anchored references use a `file://` URI to retain the heading; source locations retain their line and column. This does not modify the system clipboard.
 - Press Escape to close the list.
 
-A `Files N · /files` status appears when the session has matching, readable references. It updates after each agent run. N counts distinct targets, so two anchors in one file count separately. Existing custom pi selection keybindings work in the picker.
+A dim `Files N · /files` status appears when the session has matching, readable references. It updates after each agent run. Set `"showStatus": false` in your personal configuration to hide it without disabling `/files`. N counts distinct targets, so two anchors in one file count separately. Existing custom pi selection keybindings work in the picker.
 
 ### What gets indexed
 
@@ -98,6 +98,7 @@ To include paths mentioned in tool results and files written without an assistan
 | `includeExtensions` | Unset | Allow all suffixes. An explicit array limits them; `[]` includes none. |
 | `excludeExtensions` | `[]` | Exclude matching suffixes, even if included above. |
 | `showMissing` | `false` | Show unresolved or unreadable references with a warning. Opening still requires a readable regular file. |
+| `showStatus` | `true` | Show the dim file-count status in Pi's footer. Set to `false` to hide it; `/files` still works. |
 | `defaultOpener` | `"auto"` | `"auto"` detects cmux, otherwise uses the OS opener. `"system"` always uses the OS opener. A command array sets a custom default. |
 | `openers` | `[]` | Rules with `extensions` and `command` arrays. Longest suffix wins, case-insensitively. `"*"` is the fallback. |
 
