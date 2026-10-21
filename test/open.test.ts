@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { openFile, resolveOpenCommand } from '../src/open.ts';
+import { openFile, openReference, resolveOpenCommand } from '../src/open.ts';
 import type { OpenCommand, OpenSettings } from '../src/open.ts';
 import { parseReference } from '../src/references.ts';
 
@@ -348,4 +348,61 @@ test('real execution preserves absent locations as empty arguments rather than d
       'require("node:assert/strict").deepEqual(process.argv.slice(1), [process.argv[1], "", "", "Heading%20one"])',
       '--', '{path}', '{line}', '{column}', '{fragment}'],
   });
+});
+
+
+test('web links use the system browser on every platform and bypass file opener rules and cmux', async () => {
+  const target = { kind: 'web', path: "https://example.com/notes.md?q=a%20b&literal=';$()%23#Heading%20one" } as const;
+  const settings: OpenSettings = {
+    defaultOpener: ['editor', '{path}'],
+    openers: [{ extensions: ['.md', '*'], command: ['other-editor'] }],
+  };
+  for (const platform of ['linux', 'darwin', 'win32'] as const) {
+    const context = { platform, env: { KEEP: 'yes', CMUX_WORKSPACE_ID: 'workspace' } };
+    const expected = platform === 'win32' ? {
+      command: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $env:PI_ATTACHMENT_URI'],
+      env: { ...context.env, PI_ATTACHMENT_URI: target.path },
+    } : {
+      command: platform === 'darwin' ? 'open' : 'xdg-open',
+      args: platform === 'darwin' ? ['--', target.path] : [target.path],
+    };
+    assert.deepEqual(resolveOpenCommand(target, settings, context), expected);
+    const calls: unknown[] = [];
+    // An HTTP URL is not a local file. Success here also exercises bypassing stat/access.
+    await openReference(target, settings, { ...context, execute: async (command) => { calls.push(command); } });
+    assert.deepEqual(calls, [expected]);
+  }
+});
+
+test('web opening rejects unsafe schemes and malformed URLs before executing', async () => {
+  let executions = 0;
+  for (const path of ['javascript:alert(1)', 'data:text/html,no', 'file:///tmp/a.md', 'ftp://example.com', 'https://', 'https://example.com/\u001b]8;;bad', 'https://example.com/a b']) {
+    const target = { kind: 'web', path } as const;
+    assert.throws(() => resolveOpenCommand(target, {}, linux), /HTTP and HTTPS/);
+    await assert.rejects(openReference(target, {}, { ...linux, execute: async () => { executions++; } }), /HTTP and HTTPS/);
+  }
+  assert.equal(executions, 0);
+});
+
+test('web opener errors propagate without cmux fallback and unsupported platforms are reported', async () => {
+  const target = { kind: 'web', path: 'https://example.com/' } as const;
+  const failure = new Error('browser failed');
+  let calls = 0;
+  await assert.rejects(openReference(target, {}, {
+    ...linux, env: { CMUX_WORKSPACE_ID: 'workspace' },
+    execute: async () => { calls++; throw failure; },
+  }), (error) => error === failure);
+  assert.equal(calls, 1);
+  assert.throws(() => resolveOpenCommand(target, {}, { platform: 'aix' }), /platform: aix/);
+});
+
+test('openReference retains file validation and custom opener behavior', async (t) => {
+  const { path } = await fixture(t);
+  const calls: unknown[] = [];
+  await openReference({ path }, { defaultOpener: ['editor', '{path}'] }, {
+    ...linux, execute: async (command) => { calls.push(command); },
+  });
+  assert.deepEqual(calls, [{ command: 'editor', args: [path] }]);
+  await assert.rejects(openReference({ path: `${path}.missing` }, {}, linux), /ENOENT/);
 });

@@ -1,7 +1,7 @@
 {
   "name": "pi-references",
   "version": "0.1.0",
-  "description": "Find and open file references mentioned in your pi session.",
+  "description": "Find and open file and web references mentioned in your pi session.",
   "type": "module",
   "keywords": ["pi-package"],
   "license": "MIT",

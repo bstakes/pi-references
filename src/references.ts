@@ -1,17 +1,17 @@
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { targetKey, type FileTarget } from "./targets.ts";
+import { parseWebReference, targetKey, type ReferenceTarget } from "./targets.ts";
 
 export type ReferenceSource = "assistant" | "toolOutput" | "writes";
 
-export interface FileReference extends FileTarget {
+export type FileReference = ReferenceTarget & {
   label?: string;
   /** A short excerpt from the reply that mentioned this target. */
   context?: string;
 }
 
-export interface IndexedFile extends FileReference {
+export type IndexedFile = FileReference & {
   sources: ReferenceSource[];
   mentions: number;
 }
@@ -20,6 +20,10 @@ export interface IndexedFile extends FileReference {
 export function parseReference(raw: string, cwd: string, explicit = false): FileReference | undefined {
   let value = raw.trim().replace(/^<|>$/g, "");
   if (!value || /[\x00-\x1f\x7f]/.test(value)) return;
+  const web = parseWebReference(value);
+  if (web) return web;
+  // Reject malformed web URLs before interpreting file locations/fragments.
+  if (/^https?:/i.test(value)) return;
   // Separate URL fragments before decoding so heading anchors aren't treated
   // as filenames, while an encoded %23 remains a literal filename character.
   const fragmentIndex = value.indexOf("#");
@@ -67,17 +71,17 @@ export function parseReference(raw: string, cwd: string, explicit = false): File
   };
 }
 
-/** Markdown links, reference-style links, inline code, and plain file paths. */
-export function extractReferences(text: string, cwd: string): FileReference[] {
+/** Markdown links, reference-style links, inline code, plain paths, and web URLs. */
+export function extractReferences(text: string, cwd: string, includeWebLinks = true): FileReference[] {
   const found: FileReference[] = [];
   const add = (raw: string, label: string | undefined, explicit: boolean, offset: number, length: number) => {
     const ref = parseReference(raw, cwd, explicit);
-    if (!ref) return;
+    if (!ref || (ref.kind === "web" && !includeWebLinks)) return;
     const start = Math.max(text.lastIndexOf("\n", offset - 1) + 1, offset - 80);
     const nextLine = text.indexOf("\n", offset + length);
     const end = Math.min(nextLine < 0 ? text.length : nextLine, offset + length + 100);
     const context = text.slice(start, end)
-      .replace(/!?\[([^\]\n]*)\]\([^\n]*?\)/g, "$1")
+      .replace(/!?\[([^\]\n]*)\]\(\s*(<[^>\n]+>|(?:[^\s()]|\([^()]*\))+)(?:\s+["'][^\n]*?["'])?\s*\)/g, "$1")
       .replace(/`([^`\n]+)`/g, "$1")
       .replace(/[\x00-\x1f\x7f-\x9f\s]+/g, " ").trim().slice(0, 240);
     found.push({ ...ref, ...(label ? { label } : {}), ...(context && context !== raw.trim() && context !== label ? { context } : {}) });
@@ -92,6 +96,8 @@ export function extractReferences(text: string, cwd: string): FileReference[] {
   // original reply, not from text already rewritten by another parser pass.
   remaining = remaining.replace(/!?\[([^\]\n]*)\]\(\s*(<[^>\n]+>|(?:[^\s()]|\([^()]*\))+)(?:\s+["'][^\n]*?["'])?\s*\)/g,
     (all, label, target, offset) => { add(target, label, true, offset, all.length); return mask(all); });
+  // Mask malformed destinations too: never mine filenames from a rejected URL.
+  remaining = remaining.replace(/!?\[[^\]\n]*\]\([^\n]*?\)/g, (all) => mask(all));
   remaining = remaining.replace(/\[([^\]\n]+)\](?:\[([^\]\n]*)\])?/g, (all, label, id, offset) => {
     const target = definitions.get((id || label).trim().toLowerCase());
     if (!target) return all;
@@ -104,14 +110,21 @@ export function extractReferences(text: string, cwd: string): FileReference[] {
   });
   remaining = remaining.replace(/<([^<>\n]+)>/g, (all, target, offset) => { add(target, undefined, true, offset, all.length); return mask(all); });
   for (const match of remaining.matchAll(/\S+/g)) {
-    const candidate = match[0].replace(/^[\[({"'`]+/, "").replace(/[\])},;.!?"'`]+$/, "");
+    let candidate = match[0].replace(/^[\[({"'`]+/, "").replace(/[,;.!"'`]+$/, "");
+    // Closing prose delimiters are removable only when they are unbalanced.
+    while (/[\])}]$/.test(candidate)) {
+      const close = candidate.at(-1)!;
+      const open = ({ ")": "(", "]": "[", "}": "{" } as Record<string, string>)[close];
+      if (candidate.split(close).length <= candidate.split(open).length) break;
+      candidate = candidate.slice(0, -1).replace(/[,;.!"'`]+$/, "");
+    }
     add(candidate, undefined, false, match.index, match[0].length);
   }
   const unique = new Map<string, FileReference>();
   for (const ref of found) {
     const key = targetKey(ref);
     const previous = unique.get(key);
-    unique.set(key, { ...previous, ...ref });
+    unique.set(key, { ...(previous?.label ? { label: previous.label } : {}), ...(previous?.context ? { context: previous.context } : {}), ...ref });
   }
   return [...unique.values()];
 }
@@ -124,7 +137,8 @@ export function mergeReferences(
     const previous = index.get(key);
     index.delete(key); // Iteration order follows the most recent mention.
     index.set(key, {
-      ...previous,
+      ...(previous?.label ? { label: previous.label } : {}),
+      ...(previous?.context ? { context: previous.context } : {}),
       ...ref,
       sources: [...new Set([...(previous?.sources ?? []), source])],
       mentions: (previous?.mentions ?? 0) + 1,

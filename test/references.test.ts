@@ -64,8 +64,9 @@ test("supports inline code paths with spaces", () => {
   assert.deepEqual(targetsIn("See `/tmp/implementation plan.md`.", cwd), [{ path: resolve("/tmp/implementation plan.md") }]);
 });
 
-test("supports reference links but does not index unused definitions or web link labels", () => {
+test("supports reference links but does not index unused definitions or link labels as files", () => {
   assert.deepEqual(targetsIn("Read [playbook][p] and [plan]. [src/fake.ts](https://example.com/src/no.ts)\n[p]: /tmp/playbook.md\n[plan]: docs/plan.md\n[unused]: docs/unused.md", cwd), [
+    { kind: "web", path: "https://example.com/src/no.ts", label: "src/fake.ts" },
     { path: resolve("/tmp/playbook.md"), label: "playbook" },
     { path: path("docs/plan.md"), label: "plan" },
   ]);
@@ -84,8 +85,8 @@ test("explicit links and inline paths can name extensionless files", () => {
   assert.deepEqual(targetsIn("[plan](plan) `notes` Makefile", cwd).map((ref) => ref.path), [path("plan"), path("notes"), path("Makefile")]);
 });
 
-test("ignores non-file schemes, remote file hosts, controls, directories, and prose", () => {
-  for (const value of ["https://example.com/src/test.ts", "javascript:alert(1)", "file://server/share/file.md", "file:///tmp/%1btest.md", "/tmp/evil\x1b.md", "foo", "./", "../", "src/", "src/*.ts"]) {
+test("ignores unsafe schemes, remote file hosts, controls, directories, and prose", () => {
+  for (const value of ["javascript:alert(1)", "file://server/share/file.md", "file:///tmp/%1btest.md", "/tmp/evil\x1b.md", "foo", "./", "../", "src/", "src/*.ts"]) {
     assert.equal(parseReference(value, cwd), undefined, value);
   }
 });
@@ -113,4 +114,36 @@ test("separate anchors retain link labels and the surrounding reply context", ()
     { file: path("README.md"), fragment: "installation", label: "setup", context: "Install by reading setup first." },
     { file: path("README.md"), fragment: "configuration", label: "personal settings", context: "Configure the viewer using personal settings next." },
   ]);
+});
+
+test("web links work across Markdown, autolink, code, and plain URL forms", () => {
+  const url = "https://Example.com/docs/report(v2)?q=a%20b&n=2#L42:3";
+  for (const text of [`Read [guide](${url} "A title") now.`, `[guide][g]\n[g]: ${url} "Title"`, `<${url}>`, `\`${url}\``, `Read (${url}).`]) {
+    const refs = extractReferences(text, cwd);
+    assert.equal(refs.length, 1, text);
+    assert.equal(refs[0].kind, "web", text);
+    assert.equal(refs[0].path, url, text);
+    assert.equal(refs[0].fragment, undefined);
+    assert.equal(refs[0].line, undefined);
+  }
+  const ref = extractReferences(`Read [guide](${url} "A title") now.`, cwd)[0];
+  assert.equal(ref.label, "guide");
+  assert.equal(ref.context, "Read guide now.");
+});
+
+test("plain URL punctuation preserves balanced parentheses, query and hash", () => {
+  for (const [text, url] of [
+    ["https://example.com/a(b).", "https://example.com/a(b)"],
+    ["(https://example.com/a(b(c))).", "https://example.com/a(b(c))"],
+    ["https://example.com/a?x=1#part;", "https://example.com/a?x=1#part"],
+    ["https://example.com/?", "https://example.com/?"],
+  ]) assert.deepEqual(extractReferences(text, cwd).map((ref) => ref.path), [url]);
+});
+
+test("rejected or disabled URLs never yield filename substrings", () => {
+  const text = '[src/fake.ts](https://example.com/a.ts) <https://example.com/b.ts> `https://example.com/c.ts` https://example.com/d.ts\n[x][r]\n[r]: https://example.com/e.ts';
+  assert.deepEqual(extractReferences(text, cwd, false), []);
+  for (const bad of ["[bad](https://bad host/file.md)", "[bad](javascript:alert(1))", "<https://bad host/file.md>", "https:///example.com/file.md", "[bad](ftp://example.com/file.md)"]) {
+    assert.deepEqual(extractReferences(bad, cwd), [], bad);
+  }
 });

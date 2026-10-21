@@ -2,8 +2,8 @@ import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { targetUri } from './targets.ts';
-import type { FileTarget } from './targets.ts';
+import { parseWebReference, targetUri } from './targets.ts';
+import type { FileTarget, ReferenceTarget, WebTarget } from './targets.ts';
 
 export type FileLocation = FileTarget;
 export type OpenCommand = string[];
@@ -90,11 +90,31 @@ function buildCommand(file: FileLocation, opener: 'auto' | 'system' | OpenComman
   return { command, args };
 }
 
+/** Web links always use the browser association, never file/editor rules or cmux. */
+function webCommand(target: WebTarget, context: Context): ResolvedCommand {
+  if (!parseWebReference(target.path)) throw new Error('Only valid HTTP and HTTPS links can be opened');
+  switch (context.platform ?? process.platform) {
+    case 'darwin':
+      return { command: 'open', args: ['--', target.path] };
+    case 'linux':
+      return { command: 'xdg-open', args: [target.path] };
+    case 'win32':
+      return {
+        command: 'powershell.exe',
+        args: ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $env:PI_ATTACHMENT_URI'],
+        env: { ...(context.env ?? process.env), PI_ATTACHMENT_URI: target.path },
+      };
+    default:
+      throw new Error(`No system browser opener for platform: ${context.platform ?? process.platform}`);
+  }
+}
+
 export function resolveOpenCommand(
-  file: FileLocation,
+  file: ReferenceTarget,
   settings: OpenSettings = {},
   context: Context = {},
 ): ResolvedCommand {
+  if (file.kind === 'web') return webCommand(file, context);
   return buildCommand(file, selectOpener(file, settings), context);
 }
 
@@ -108,7 +128,7 @@ async function execute(command: ResolvedCommand): Promise<void> {
     child.once('error', reject);
     child.once('close', (code, signal) => {
       if (code === 0) resolve();
-      else reject(new Error(`File opener ${command.command} failed (${signal ? `signal ${signal}` : `exit code ${code}`})`));
+      else reject(new Error(`Opener ${command.command} failed (${signal ? `signal ${signal}` : `exit code ${code}`})`));
     });
   });
 }
@@ -132,4 +152,13 @@ export async function openFile(
     if (!isAutoCmux(opener, context)) throw error;
     await run(systemCommand(absoluteFile, context));
   }
+}
+
+export async function openReference(
+  target: ReferenceTarget,
+  settings: OpenSettings = {},
+  context: ExecutionContext = {},
+): Promise<void> {
+  if (target.kind !== 'web') return openFile(target, settings, context);
+  await (context.execute ?? execute)(webCommand(target, context));
 }

@@ -16,7 +16,7 @@ export function displayText(text: string): string {
 
 
 export class FilePicker implements Component, Focusable {
-  private input = new Input({ prompt: "Find: ", placeholder: "path or link title" });
+  private input = new Input({ prompt: "Find: ", placeholder: "path, URL, or link title" });
   private list!: SelectList;
   private filtered: AvailableFile[] = [];
   private files: AvailableFile[];
@@ -42,6 +42,7 @@ export class FilePicker implements Component, Focusable {
   set focused(value: boolean) { this.input.focused = value; }
 
   private projectPath(file: AvailableFile): string | undefined {
+    if (file.kind === "web") return undefined;
     const local = relative(this.cwd, file.path);
     return local && !isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`) ? local : undefined;
   }
@@ -57,14 +58,14 @@ export class FilePicker implements Component, Focusable {
     this.filtered = fuzzyFilter(this.files, query, (file) => {
       // Shared project roots and temporary-directory names can match nearly
       // every fuzzy query. Search those only when the user includes a slash.
-      const path = searchFullPath ? file.path : this.projectPath(file) ?? basename(file.path);
+      const path = file.kind === "web" || searchFullPath ? file.path : this.projectPath(file) ?? basename(file.path);
       return `${path}${targetSuffix(file)} ${file.label ?? ""}`;
     });
     this.maxVisible = Math.max(1, Math.min(12, this.rows() - 10));
     this.list = new SelectList(this.filtered.map((file) => ({
       value: targetKey(file),
       label: hyperlink(this.name(file), targetUri(file)),
-      description: displayText([file.available ? "" : "missing or unreadable", file.label, file.sources.join(", ")].filter(Boolean).join(" · ")),
+      description: displayText([file.kind === "web" ? "web" : file.available ? "" : "missing or unreadable", file.label, file.sources.join(", ")].filter(Boolean).join(" · ")),
     })), this.maxVisible, {
       selectedPrefix: (text) => this.theme.fg("accent", text),
       selectedText: (text) => this.theme.fg("accent", text),

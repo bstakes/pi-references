@@ -153,3 +153,42 @@ test("anchor names can narrow the fuzzy list without changing the file target", 
   picker.handleInput("\r");
   assert.equal(result?.file.fragment, "installation");
 });
+
+
+test("web links share the picker with files and search by hostname, URL, and Markdown title", () => {
+  const web: AvailableFile = {
+    kind: "web", path: "https://docs.example.com/guides/setup?mode=dev#install", label: "Browser setup",
+    context: "Follow Browser setup before starting.", sources: ["assistant"], mentions: 1, available: true,
+  };
+  for (const query of ["docs.example.com", "guides/setup", "mode=dev", "install", "Browser setup"]) {
+    let result: PickerResult | undefined;
+    const picker = new FilePicker([...files, web], "/project", theme, () => 24, (value) => { result = value; }, query);
+    const rendered = picker.render(180).join("\n");
+    assert.ok(rendered.includes("1/4"), query);
+    assert.ok(rendered.includes(`\x1b]8;;${web.path}`), "OSC 8 link retains the actual URL");
+    assert.ok(rendered.includes(web.path));
+    assert.ok(rendered.includes("web"));
+    assert.ok(rendered.includes(web.context!));
+    assert.ok(!rendered.includes("file:///project/https"));
+    picker.handleInput("\r");
+    assert.equal(result?.file, web);
+    assert.equal(result?.action, "open");
+  }
+});
+
+test("web selection retains query strings and fragments when pasting, resizing, and rendering narrowly", () => {
+  const candidates: AvailableFile[] = ["first", "second"].map((fragment) => ({
+    kind: "web", path: `https://example.com/docs?q=a%20b#${fragment}`, sources: ["assistant"], mentions: 1, available: true,
+  }));
+  let result: PickerResult | undefined;
+  let rows = 24;
+  const picker = new FilePicker(candidates, "/project", theme, () => rows, (value) => { result = value; });
+  picker.handleInput("\x1b[B");
+  rows = 12;
+  for (const width of [1, 2, 8, 20, 60, 120]) {
+    for (const line of picker.render(width)) assert.ok(visibleWidth(line) <= width);
+  }
+  picker.handleInput("\x19");
+  assert.equal(result?.file.path, candidates[1].path);
+  assert.equal(result?.action, "paste");
+});

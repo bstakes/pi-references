@@ -6,6 +6,7 @@ export interface Settings extends OpenSettings {
   sources: Record<ReferenceSource, boolean>;
   includeExtensions?: string[];
   excludeExtensions: string[];
+  includeWebLinks: boolean;
   showMissing: boolean;
   showStatus: boolean;
 }
@@ -13,6 +14,7 @@ export interface Settings extends OpenSettings {
 const defaults = (): Settings => ({
   sources: { assistant: true, toolOutput: false, writes: false },
   excludeExtensions: [],
+  includeWebLinks: true,
   showMissing: false,
   showStatus: true,
   defaultOpener: "auto",
@@ -37,7 +39,7 @@ function extensions(value: unknown, name: string, allowWildcard = false): string
 export function parseSettings(value: unknown): Settings {
   if (!object(value)) throw new Error("Settings must be a JSON object.");
   const settings = defaults();
-  const known = new Set(["sources", "includeExtensions", "excludeExtensions", "showMissing", "showStatus", "defaultOpener", "openers"]);
+  const known = new Set(["sources", "includeWebLinks", "includeExtensions", "excludeExtensions", "showMissing", "showStatus", "defaultOpener", "openers"]);
   for (const key of Object.keys(value)) {
     if (!known.has(key)) throw new Error(`Unknown references setting: ${key}`);
   }
@@ -50,6 +52,10 @@ export function parseSettings(value: unknown): Settings {
   }
   if (value.includeExtensions !== undefined) settings.includeExtensions = extensions(value.includeExtensions, "includeExtensions");
   if (value.excludeExtensions !== undefined) settings.excludeExtensions = extensions(value.excludeExtensions, "excludeExtensions");
+  if (value.includeWebLinks !== undefined) {
+    if (typeof value.includeWebLinks !== "boolean") throw new Error("includeWebLinks must be a boolean.");
+    settings.includeWebLinks = value.includeWebLinks;
+  }
   if (value.showMissing !== undefined) {
     if (typeof value.showMissing !== "boolean") throw new Error("showMissing must be a boolean.");
     settings.showMissing = value.showMissing;

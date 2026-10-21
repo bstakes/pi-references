@@ -97,3 +97,40 @@ test("missing-file display and extension filters apply without a filesystem scan
   index.ingest(assistant("missing.md main.ts report.pdf"));
   assert.deepEqual((await index.available()).map((file) => [file.path, file.available]), [[join(root, "missing.md"), false]]);
 });
+
+test("web availability bypasses file filters and missing-file checks", async () => {
+  const index = new FileIndex("/nonexistent", parseSettings({ includeExtensions: [], excludeExtensions: [".pdf"] }));
+  index.ingest(assistant("[report](https://example.invalid/report.pdf) missing.md"));
+  assert.deepEqual((await index.available()).map((ref) => [ref.kind, ref.path, ref.available]), [["web", "https://example.invalid/report.pdf", true]]);
+  const disabled = new FileIndex("/project", parseSettings({ includeWebLinks: false, showMissing: true }));
+  disabled.ingest(assistant("[src/a.ts](https://example.com/src/b.ts) https://example.com/c.md local.md"));
+  assert.deepEqual(disabled.values().map((ref) => ref.path), [resolve("/project/local.md")]);
+});
+
+test("web grouping retains latest label/context, source switches, and active branch", () => {
+  const url = "https://example.com/a?q=1#section";
+  const root = entry(assistant(`Read [first](${url}) initially.`));
+  const latest = entry(assistant(`Revisit [latest](${url}) now.`));
+  const index = new FileIndex("/project", parseSettings({}));
+  index.rebuild([root, entry(assistant("https://abandoned.invalid/")), latest]);
+  index.rebuild([root, latest]);
+  assert.equal(index.values().length, 1);
+  assert.equal(index.values()[0].mentions, 2);
+  assert.equal(index.values()[0].label, "latest");
+  assert.equal(index.values()[0].context, "Revisit latest now.");
+  const live = index.values();
+  index.rebuild([root]);
+  index.ingest(latest.message);
+  assert.deepEqual(index.values(), live);
+  const tool = { role: "toolResult", content: [{ type: "text", text: url }] };
+  const tools = new FileIndex("/project", parseSettings({ sources: { assistant: false, toolOutput: true, writes: true } }));
+  tools.ingest(root.message);
+  assert.deepEqual(tools.values(), []);
+  tools.ingest(tool);
+  assert.deepEqual(tools.values()[0].sources, ["toolOutput"]);
+  index.ingest(tool);
+  assert.equal(index.values()[0].mentions, 2);
+  tools.ingest({ role: "assistant", content: [{ type: "toolCall", id: "url", name: "write", arguments: { path: "https://write.invalid/a.md" } }] });
+  tools.ingest({ role: "toolResult", toolCallId: "url", toolName: "write", isError: false, content: [] });
+  assert.equal(tools.values().length, 1);
+});

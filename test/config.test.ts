@@ -92,3 +92,12 @@ test("duplicate suffixes and wildcards are rejected case-insensitively", () => {
     assert.throws(() => parseSettings({ openers: extensions.map((ext) => ({ extensions: [ext], command: ["open"] })) }), /Duplicate opener/);
   }
 });
+
+test("web links default on and require a boolean setting", () => {
+  assert.equal(parseSettings({}).includeWebLinks, true);
+  assert.equal(parseSettings({ includeWebLinks: false }).includeWebLinks, false);
+  assert.equal(parseSettings({ includeWebLinks: true }).includeWebLinks, true);
+  for (const includeWebLinks of [null, 0, "false", [], {}]) {
+    assert.throws(() => parseSettings({ includeWebLinks }), /includeWebLinks must be a boolean/);
+  }
+});

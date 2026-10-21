@@ -96,7 +96,7 @@ test("pi loads the extension, restores history, updates branches, and applies se
   await command.handler("", ctx);
   assert.equal(pickerCount, 2);
   assert.equal(status, undefined, "no status when no files match");
-  assert.ok(notices.at(-1)?.includes("No readable referenced files"));
+  assert.ok(notices.at(-1)?.includes("No referenced files or web links match"));
   await writeFile(join(root, "references.json"), '{"defaultOpener":"invalid"}');
   await command.handler("", ctx);
   assert.equal(pickerCount, 2);
@@ -121,4 +121,33 @@ test("pi loads the extension, restores history, updates branches, and applies se
   }
   assert.equal(pickerCount, 3);
   assert.equal(notices.at(-1), "/refs needs pi's interactive terminal UI.");
+
+
+  ctx.mode = "tui";
+  ctx.hasUI = true;
+  const url = "https://docs.example.com/start.md?mode=dev#installation";
+  entries = [response(`Read the [browser guide](${url}).`)];
+  await emit("session_start");
+  assert.equal(status, "<dim>References 1 · /refs</dim>", "web links are indexed by default");
+  await command.handler("browser guide", ctx);
+  assert.equal(pasted, JSON.stringify(url), "paste preserves the URL, query, and fragment");
+  assert.ok(rendered.includes(url));
+  assert.ok(rendered.includes("browser guide"));
+  assert.equal(pickerCount, 4);
+
+  await writeFile(join(root, "references.json"), '{"includeWebLinks":false}');
+  await command.handler("", ctx);
+  assert.equal(status, undefined);
+  assert.equal(pickerCount, 4, "disabling web links takes effect on the next invocation");
+  assert.ok(notices.at(-1)?.includes("No referenced files or web links match"));
+
+  await writeFile(join(root, "references.json"), '{"includeWebLinks":true,"includeExtensions":[],"excludeExtensions":[".md"]}');
+  await command.handler("example.com", ctx);
+  assert.equal(status, "<dim>References 1 · /refs</dim>", "file extension filters do not exclude web links");
+  assert.equal(pickerCount, 5);
+  assert.equal(pasted, JSON.stringify(url));
+  entries = [];
+  await emit("session_tree");
+  assert.equal(status, undefined, "web links follow the active branch");
+  await emit("session_shutdown");
 });

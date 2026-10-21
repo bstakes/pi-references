@@ -2,7 +2,7 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil
 import { join } from "node:path";
 import { loadSettings, type Settings } from "./config.ts";
 import { FileIndex } from "./file-index.ts";
-import { openFile } from "./open.ts";
+import { openReference } from "./open.ts";
 import { FilePicker, displayText, type PickerResult } from "./picker.ts";
 import { targetSuffix, targetUri } from "./targets.ts";
 
@@ -55,7 +55,7 @@ export default function references(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("refs", {
-    description: "Fuzzy-find and open file references in this session. /refs [query]",
+    description: "Fuzzy-find and open file and web references in this session. /refs [query]",
     handler: async (query, ctx) => {
       if (ctx.mode !== "tui") {
         if (ctx.hasUI) ctx.ui.notify("/refs needs pi's interactive terminal UI.", "warning");
@@ -68,7 +68,7 @@ export default function references(pi: ExtensionAPI): void {
       const files = await current.index.available();
       if (state !== current) return;
       if (!files.length) {
-        ctx.ui.notify("No readable referenced files on this session branch. Missing /tmp files may have expired. Discovery settings live in " + configPath, "info");
+        ctx.ui.notify("No referenced files or web links match on this session branch. Missing /tmp files may have expired. Discovery settings live in " + configPath, "info");
         return;
       }
       const result = await ctx.ui.custom<PickerResult | undefined>((tui, theme, keys, done) =>
@@ -76,12 +76,12 @@ export default function references(pi: ExtensionAPI): void {
       );
       if (!result || state !== current) return;
       if (result.action === "paste") {
-        const reference = result.file.fragment ? targetUri(result.file) : result.file.path + targetSuffix(result.file);
+        const reference = result.file.kind === "web" || result.file.fragment ? targetUri(result.file) : result.file.path + targetSuffix(result.file);
         ctx.ui.pasteToEditor(JSON.stringify(reference));
         return;
       }
       try {
-        await openFile(result.file, current.settings);
+        await openReference(result.file, current.settings);
       } catch (error) {
         report(ctx, error);
       }
