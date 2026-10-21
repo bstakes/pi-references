@@ -4,15 +4,25 @@ Fuzzy-find files and web links the assistant references in your pi session. Plan
 
 Built-in cmux support needs no configuration. Inside a cmux workspace, Enter opens files with `cmux open`. In other terminals, it uses your operating system's default app. You can also configure custom openers, including terminal editors in cmux splits.
 
-## Try it
+## Install
 
 Requires pi 1.3.0 or later and Node.js 22.19 or later.
 
+Install from GitHub:
+
 ```sh
-pi -e ./src/extension.ts
+pi install git:github.com/bstakes/pi-references
 ```
 
-To load the package on future launches, run `pi install /absolute/path/to/pi-references`. This changes your personal pi settings. Resume an existing session to browse its earlier references too.
+This adds the package to your personal pi settings for future launches. Resume an existing session to browse its earlier references too.
+
+To try it for one launch without changing settings:
+
+```sh
+pi -e git:github.com/bstakes/pi-references
+```
+
+From a local checkout, use `pi -e ./src/extension.ts` to try it, or `pi install /absolute/path/to/pi-references` to keep it installed.
 
 ## Use it
 
