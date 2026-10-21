@@ -34,6 +34,9 @@ test("showStatus accepts booleans and rejects other values", () => {
   }
 });
 
+test("unknown settings report the references name", () => {
+  assert.throws(() => parseSettings({ typo: true }), /Unknown references setting: typo/);
+});
 test("malformed config cannot quietly select executable commands", () => {
   for (const value of [
     null, [], { typo: true }, { sources: { bad: true } }, { sources: { assistant: "yes" } },
@@ -59,9 +62,9 @@ test("malformed config cannot quietly select executable commands", () => {
 });
 
 test("missing personal config is fine; malformed JSON is reported", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "pi-files-config-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-references-config-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const path = join(root, "attachment-browser.json");
+  const path = join(root, "references.json");
   assert.deepEqual(await loadSettings(path), parseSettings({}));
   await writeFile(path, "not JSON");
   await assert.rejects(loadSettings(path));

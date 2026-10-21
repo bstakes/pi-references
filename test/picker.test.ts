@@ -25,7 +25,7 @@ test("picker fuzzy-matches paths and link titles, then opens the original file r
 });
 
 test("typing a filename filters out matches found only in the shared project path", () => {
-  const cwd = resolve("/Users/example/projects/playground/pi-attachment-browser");
+  const cwd = resolve("/Users/example/projects/playground/pi-references");
   const candidates: AvailableFile[] = ["src/config.ts", "src/picker.ts", "README.md", "package.json"].map((name) => ({
     path: resolve(cwd, name), sources: ["assistant"], mentions: 1, available: true,
   }));
@@ -82,7 +82,7 @@ test("picker supports navigation, paste path, cancellation, and no-match input",
   closed = false;
   noMatch.handleInput("\r");
   assert.equal(closed, false);
-  assert.ok(noMatch.render(80).some((line) => line.includes("No matching files")));
+  assert.ok(noMatch.render(80).some((line) => line.includes("No matching references")));
   noMatch.handleInput("\x1b");
   assert.equal(closed, true);
 });

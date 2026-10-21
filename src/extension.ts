@@ -6,30 +6,30 @@ import { openFile } from "./open.ts";
 import { FilePicker, displayText, type PickerResult } from "./picker.ts";
 import { targetSuffix, targetUri } from "./targets.ts";
 
-export default function attachmentBrowser(pi: ExtensionAPI): void {
-  const configPath = join(getAgentDir(), "attachment-browser.json");
+export default function references(pi: ExtensionAPI): void {
+  const configPath = join(getAgentDir(), "references.json");
   let state: { index: FileIndex; settings: Settings } | undefined;
   let generation = 0;
 
   const report = (ctx: ExtensionContext, error: unknown) => {
-    if (ctx.hasUI) ctx.ui.notify(`Files: ${displayText(error instanceof Error ? error.message : String(error))}`, "error");
+    if (ctx.hasUI) ctx.ui.notify(`References: ${displayText(error instanceof Error ? error.message : String(error))}`, "error");
   };
 
   const updateStatus = async (ctx: ExtensionContext) => {
     if (ctx.mode !== "tui" || !state) return;
     if (!state.settings.showStatus) {
-      ctx.ui.setStatus("attachment-browser", undefined);
+      ctx.ui.setStatus("references", undefined);
       return;
     }
     const version = generation;
     const files = await state.index.available();
-    if (version === generation) ctx.ui.setStatus("attachment-browser", files.length ? ctx.ui.theme.fg("dim", `Files ${files.length} · /files`) : undefined);
+    if (version === generation) ctx.ui.setStatus("references", files.length ? ctx.ui.theme.fg("dim", `References ${files.length} · /refs`) : undefined);
   };
 
   const rebuild = async (ctx: ExtensionContext) => {
     const version = ++generation;
     state = undefined;
-    if (ctx.mode === "tui") ctx.ui.setStatus("attachment-browser", undefined);
+    if (ctx.mode === "tui") ctx.ui.setStatus("references", undefined);
     try {
       const settings = await loadSettings(configPath);
       const index = new FileIndex(ctx.cwd, settings);
@@ -51,14 +51,14 @@ export default function attachmentBrowser(pi: ExtensionAPI): void {
   pi.on("session_shutdown", (_event, ctx) => {
     generation++;
     state = undefined;
-    if (ctx.mode === "tui") ctx.ui.setStatus("attachment-browser", undefined);
+    if (ctx.mode === "tui") ctx.ui.setStatus("references", undefined);
   });
 
-  pi.registerCommand("files", {
-    description: "Fuzzy-find and open files referenced in this session. /files [query]",
+  pi.registerCommand("refs", {
+    description: "Fuzzy-find and open file references in this session. /refs [query]",
     handler: async (query, ctx) => {
       if (ctx.mode !== "tui") {
-        if (ctx.hasUI) ctx.ui.notify("/files needs pi's interactive terminal UI.", "warning");
+        if (ctx.hasUI) ctx.ui.notify("/refs needs pi's interactive terminal UI.", "warning");
         return;
       }
       // Re-read personal settings and re-check paths each time. No watcher,

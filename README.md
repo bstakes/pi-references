@@ -1,4 +1,4 @@
-# pi attachment browser
+# pi references
 
 Fuzzy-find files the assistant references in your pi session. Plans, playbooks, images, source code, and `/tmp` outputs stay where they are. This extension keeps references, not copies.
 
@@ -12,18 +12,18 @@ Requires pi 1.3.0 or later and Node.js 22.19 or later.
 pi -e ./src/extension.ts
 ```
 
-To load the package on future launches, run `pi install /absolute/path/to/pi-attachment-browser`. This changes your personal pi settings. Resume an existing session to browse its earlier references too.
+To load the package on future launches, run `pi install /absolute/path/to/pi-references`. This changes your personal pi settings. Resume an existing session to browse its earlier references too.
 
 ## Use it
 
-Run `/files`, or `/files playbook` to start with a search. The picker filters and ranks matches as you type. Ordinary queries search project-relative paths, external filenames, anchors, and Markdown link titles, without matching the shared project root or temporary-directory prefixes. Include a slash in the query to search full paths. Recent mentions appear first when the query is empty.
+Run `/refs`, or `/refs playbook` to start with a search. The References picker filters and ranks matches as you type. Ordinary queries search project-relative paths, external filenames, anchors, and Markdown link titles, without matching the shared project root or temporary-directory prefixes. Include a slash in the query to search full paths. Recent mentions appear first when the query is empty.
 
 - Type to filter, then use Up/Down and Enter to open a file.
 - Click a file hyperlink using your terminal's usual modifier, such as Ctrl+click or Cmd+click.
 - Press Ctrl+Y to paste the selected reference into the pi prompt, quoted as a JSON string. Anchored references use a `file://` URI to retain the heading; source locations retain their line and column. This does not modify the system clipboard.
 - Press Escape to close the list.
 
-A dim `Files N · /files` status appears when the session has matching, readable references. It updates after each agent run. Set `"showStatus": false` in your personal configuration to hide it without disabling `/files`. N counts distinct targets, so two anchors in one file count separately. Existing custom pi selection keybindings work in the picker.
+A dim `References N · /refs` status appears when the session has matching, readable references. It updates after each agent run. Set `"showStatus": false` in your personal configuration to hide it without disabling `/refs`. N counts distinct targets, so two anchors in one file count separately. Existing custom pi selection keybindings work in the picker.
 
 ### What gets indexed
 
@@ -52,7 +52,7 @@ Heading navigation has a known limitation in cmux 0.65.2, commit `9d01f956c`. `c
 
 ## Optional personal configuration
 
-No settings file is needed. To customize behavior, create `~/.pi/agent/attachment-browser.json`. If you use a custom pi agent directory, put it there instead. The extension reads this file on session start and each `/files` invocation. It does not load project-local executable settings.
+No settings file is needed. To customize behavior, create `~/.pi/agent/references.json`. If you use a custom pi agent directory, put it there instead. The extension reads this file on session start and each `/refs` invocation. It does not load project-local executable settings.
 
 For example, open JavaScript and TypeScript in VS Code while leaving other files on the built-in automatic opener:
 
@@ -98,7 +98,7 @@ To include paths mentioned in tool results and files written without an assistan
 | `includeExtensions` | Unset | Allow all suffixes. An explicit array limits them; `[]` includes none. |
 | `excludeExtensions` | `[]` | Exclude matching suffixes, even if included above. |
 | `showMissing` | `false` | Show unresolved or unreadable references with a warning. Opening still requires a readable regular file. |
-| `showStatus` | `true` | Show the dim file-count status in Pi's footer. Set to `false` to hide it; `/files` still works. |
+| `showStatus` | `true` | Show the dim reference-count status in Pi's footer. Set to `false` to hide it; `/refs` still works. |
 | `defaultOpener` | `"auto"` | `"auto"` detects cmux, otherwise uses the OS opener. `"system"` always uses the OS opener. A command array sets a custom default. |
 | `openers` | `[]` | Rules with `extensions` and `command` arrays. Longest suffix wins, case-insensitively. `"*"` is the fallback. |
 
@@ -180,7 +180,7 @@ sudo install -m 755 cmux-nvim /usr/local/bin/cmux-nvim
 
 Both `cmux` and `nvim` must be on pi's `PATH`. The wrapper opens Neovim in a right split beside the calling surface. It jumps only when a line is present, using column 1 if none is supplied. Named headings open at the editor's normal position. The command arguments are quoted with Bash's `printf '%q'` and executed with noninteractive Bash, without loading shell startup files.
 
-Configure `~/.pi/agent/attachment-browser.json`:
+Configure `~/.pi/agent/references.json`:
 
 ```json
 {
@@ -202,7 +202,7 @@ Only the listed source extensions use Neovim. Markdown opens directly in cmux's 
 
 ## Limits
 
-Discovery is text-based, not a complete Markdown parser. Unusual escaping, deeply nested link destinations, and paths embedded in arbitrary code or structured tool data may be missed. Web URLs and remote file shares are not attachments. This extension does not monitor the filesystem, infer shell redirection targets, discover unreferenced build outputs, or preserve deleted temporary files. Optional write tracking does not reconstruct tools nested inside another tool.
+Discovery is text-based, not a complete Markdown parser. Unusual escaping, deeply nested link destinations, and paths embedded in arbitrary code or structured tool data may be missed. Web URLs and remote file shares are not indexed. This extension does not monitor the filesystem, infer shell redirection targets, discover unreferenced build outputs, or preserve deleted temporary files. Optional write tracking does not reconstruct tools nested inside another tool.
 
 Under SSH, file paths refer to the machine running pi. The local terminal may not be able to open those paths. Use your terminal's remote-file handling or configure an appropriate opener.
 
@@ -219,4 +219,4 @@ npm pack --dry-run
 
 Tests cover reference discovery, active-branch reconstruction, missing files, filters, fuzzy searching, terminal links, narrow rendering, custom selection bindings, opener selection, and safe argument passing. Tests do not launch desktop applications.
 
-For a manual check, load the extension, ask pi to reference an existing Markdown file and a `/tmp` file, then run `/files`. Check both Enter and your terminal's link-click gesture. Repeat after resuming the session. Native cmux click behavior and desktop application opening require this manual check.
+For a manual check, load the extension, ask pi to reference an existing Markdown file and a `/tmp` file, then run `/refs`. Check both Enter and your terminal's link-click gesture. Repeat after resuming the session. Native cmux click behavior and desktop application opening require this manual check.

@@ -70,7 +70,7 @@ export class FilePicker implements Component, Focusable {
       selectedText: (text) => this.theme.fg("accent", text),
       description: (text) => this.theme.fg("muted", text),
       scrollInfo: (text) => this.theme.fg("dim", text),
-      noMatch: () => this.theme.fg("dim", "No matching files"),
+      noMatch: () => this.theme.fg("dim", "No matching references"),
     }, { minPrimaryColumnWidth: 20, maxPrimaryColumnWidth: 72 });
     if (selected) this.list.setSelectedIndex(Math.max(0, this.filtered.findIndex((file) => targetKey(file) === selected)));
     this.list.onSelect = () => this.finish("open");
@@ -99,14 +99,14 @@ export class FilePicker implements Component, Focusable {
     if (this.maxVisible !== Math.max(1, Math.min(12, this.rows() - 10))) this.update(true);
     const selected = this.filtered.find((file) => targetKey(file) === this.list.getSelectedItem()?.value);
     const lines = [
-      this.theme.fg("accent", `Session files · ${this.filtered.length}/${this.files.length}`),
+      this.theme.fg("accent", `References · ${this.filtered.length}/${this.files.length}`),
       ...this.input.render(Math.max(1, width)),
       "",
       ...this.list.render(Math.max(4, width)),
       "",
       selected ? hyperlink(displayText(selected.path + targetSuffix(selected)), targetUri(selected)) : "",
       selected?.context ? this.theme.fg("muted", displayText(selected.context)) : "",
-      this.theme.fg("dim", "Enter open · Ctrl+Y paste path · Esc close · links use your terminal"),
+      this.theme.fg("dim", "Enter open · Ctrl+Y paste reference · Esc close · links use your terminal"),
     ];
     return lines.map((line) => truncateToWidth(line, Math.max(1, width)));
   }

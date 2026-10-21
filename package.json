@@ -1,7 +1,7 @@
 {
-  "name": "pi-attachment-browser",
+  "name": "pi-references",
   "version": "0.1.0",
-  "description": "Fuzzy-find and open files referenced in your pi session.",
+  "description": "Find and open file references mentioned in your pi session.",
   "type": "module",
   "keywords": ["pi-package"],
   "license": "MIT",

@@ -11,7 +11,7 @@ import { targetUri } from "../src/targets.ts";
 // Load through pi itself, but supply a fake terminal. No model calls or desktop
 // application launches are needed to exercise lifecycle and command behavior.
 test("pi loads the extension, restores history, updates branches, and applies settings without opening apps", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "pi-files-extension-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-references-extension-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = root;
   t.after(async () => {
@@ -36,7 +36,7 @@ test("pi loads the extension, restores history, updates branches, and applies se
     hasUI: true,
     sessionManager: { getBranch: () => entries },
     ui: {
-      setStatus: (_key: string, text: string | undefined) => { status = text; },
+      setStatus: (key: string, text: string | undefined) => { assert.equal(key, "references"); status = text; },
       theme: { fg: (color: string, text: string) => `<${color}>${text}</${color}>` },
       notify: (text: string) => { notices.push(text); },
       pasteToEditor: (text: string) => { pasted = text; },
@@ -57,27 +57,30 @@ test("pi loads the extension, restores history, updates branches, and applies se
   const emit = async (name: string, event = {}) => {
     for (const handler of extension.handlers.get(name) ?? []) await handler(event, ctx);
   };
-  const command = extension.commands.get("files");
+  assert.deepEqual([...extension.commands.keys()], ["refs"], "registers /refs without a /files alias");
+  const command = extension.commands.get("refs");
   assert.ok(command);
+  assert.ok(command.description?.includes("/refs [query]"));
   assert.equal(extension.tools.size, 0, "doesn't add a model tool or require agent cooperation");
 
   await emit("session_start");
-  assert.equal(status, "<dim>Files 1 · /files</dim>");
+  assert.equal(status, "<dim>References 1 · /refs</dim>");
   await command.handler("pln", ctx);
   assert.equal(pasted, JSON.stringify(plan));
   assert.ok(rendered.includes("file://"));
   assert.ok(rendered.includes("implementation plan"));
+  assert.ok(rendered.includes("References · 1/1"));
 
   const latest = response(`Source: ${code}:42`);
   entries.push(latest);
   await emit("message_end", { message: latest.message });
   await emit("agent_end");
-  assert.equal(status, "<dim>Files 2 · /files</dim>");
+  assert.equal(status, "<dim>References 2 · /refs</dim>");
   entries = entries.slice(0, 1);
   await emit("session_tree");
-  assert.equal(status, "<dim>Files 1 · /files</dim>");
+  assert.equal(status, "<dim>References 1 · /refs</dim>");
 
-  await writeFile(join(root, "attachment-browser.json"), '{"showStatus":false}');
+  await writeFile(join(root, "references.json"), '{"showStatus":false}');
   await emit("session_tree");
   assert.equal(status, undefined, "hides an existing status when disabled");
   await emit("agent_end");
@@ -86,23 +89,25 @@ test("pi loads the extension, restores history, updates branches, and applies se
   assert.equal(pickerCount, 2, "the picker still works with the status hidden");
   assert.equal(pasted, JSON.stringify(plan));
   assert.equal(status, undefined);
-  await writeFile(join(root, "attachment-browser.json"), '{"showStatus":true}');
+  await writeFile(join(root, "references.json"), '{"showStatus":true}');
   await emit("session_tree");
-  assert.equal(status, "<dim>Files 1 · /files</dim>");
-  await writeFile(join(root, "attachment-browser.json"), '{"includeExtensions":[".pdf"]}');
+  assert.equal(status, "<dim>References 1 · /refs</dim>");
+  await writeFile(join(root, "references.json"), '{"includeExtensions":[".pdf"]}');
   await command.handler("", ctx);
   assert.equal(pickerCount, 2);
   assert.equal(status, undefined, "no status when no files match");
   assert.ok(notices.at(-1)?.includes("No readable referenced files"));
-  await writeFile(join(root, "attachment-browser.json"), '{"defaultOpener":"invalid"}');
+  await writeFile(join(root, "references.json"), '{"defaultOpener":"invalid"}');
   await command.handler("", ctx);
   assert.equal(pickerCount, 2);
+  assert.ok(notices.at(-1)?.startsWith("References: "));
+  assert.ok(notices.at(-1)?.includes("references.json"));
   assert.ok(notices.at(-1)?.includes("defaultOpener"));
-  await rm(join(root, "attachment-browser.json"));
+  await rm(join(root, "references.json"));
 
   entries.push(response(`Install with [setup](${plan}#installation).\nCustomize using [settings](${plan}#configuration) next.`));
   await command.handler("configuration", ctx);
-  assert.equal(status, "<dim>Files 3 · /files</dim>");
+  assert.equal(status, "<dim>References 3 · /refs</dim>");
   assert.equal(pasted, JSON.stringify(targetUri({ path: plan, fragment: "configuration" })));
   assert.ok(rendered.includes("#configuration"));
   assert.ok(rendered.includes("Customize using settings next."));
@@ -115,4 +120,5 @@ test("pi loads the extension, restores history, updates branches, and applies se
     await command.handler("", ctx);
   }
   assert.equal(pickerCount, 3);
+  assert.equal(notices.at(-1), "/refs needs pi's interactive terminal UI.");
 });

@@ -39,7 +39,7 @@ export function parseSettings(value: unknown): Settings {
   const settings = defaults();
   const known = new Set(["sources", "includeExtensions", "excludeExtensions", "showMissing", "showStatus", "defaultOpener", "openers"]);
   for (const key of Object.keys(value)) {
-    if (!known.has(key)) throw new Error(`Unknown attachment-browser setting: ${key}`);
+    if (!known.has(key)) throw new Error(`Unknown references setting: ${key}`);
   }
   if (value.sources !== undefined) {
     if (!object(value.sources)) throw new Error("sources must be an object of booleans.");
